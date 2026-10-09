@@ -224,13 +224,13 @@ with aba_conf:
             st.warning(f"Reincidência: {nome} já teve {n} devolução(ões) em conferências anteriores.")
 
         df = tabela(resultados)
-        filtro = st.multiselect("Filtrar status", sorted(df["Status"].unique()))
+        filtro = st.multiselect("Filtrar status", sorted(df["Status"].unique()), placeholder="Todos os status")
         st.dataframe(df[df["Status"].isin(filtro)] if filtro else df, width="stretch", hide_index=True)
 
         escolhido = st.selectbox(
-            "Ver detalhes de:", [None] + list(range(len(resultados))),
-            format_func=lambda i: "" if i is None else
-            f"{resultados[i].pagamento.favorecido} — {_fmt_valor(resultados[i].pagamento.valor)} — "
+            "Ver detalhes de:", list(range(len(resultados))), index=None,
+            placeholder="Escolha um favorecido para ver em quais arquivos ele aparece",
+            format_func=lambda i: f"{resultados[i].pagamento.favorecido} — {_fmt_valor(resultados[i].pagamento.valor)} — "
             f"{resultados[i].rotulo}")
         if escolhido is not None:
             r = resultados[escolhido]
