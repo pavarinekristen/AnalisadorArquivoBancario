@@ -1,64 +1,31 @@
-"""Estruturas de dados usadas em toda a conferência."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from enum import StrEnum
+from typing import Literal
+
+TipoArquivo = Literal["MOV", "CRI", "REL", "RETORNO", "OUTRO"]
+Segmento = Literal["A", "J"]
 
 
-@dataclass
-class ArquivoBanco:
-    nome: str
-    tipo: str              # MOV, CRI, REL, RETORNO, OUTRO
-    data: date | None      # data do nome do arquivo (DDMMAA)
-    lote: int | None       # NN do nome do arquivo
-    empresa: str | None    # COD do nome (ex: EZN1)
-
-    @property
-    def ordem(self) -> tuple:
-        return (self.data or date.min, self.lote or 0, self.nome)
+class Status(StrEnum):
+    PAGO = "pago"
+    DEVOLUCAO = "devolucao"
+    REJEITADO = "rejeitado"
+    ACEITO_NAO_PAGO = "aceito_nao_pago"
+    OUTRO_PAGAMENTO = "outro_pagamento"
+    NAO_ENVIADO = "nao_enviado"
 
 
-@dataclass
-class RegistroBanco:
-    arquivo: ArquivoBanco
-    segmento: str          # A ou J
-    nome: str
-    cpf_cnpj: str          # sem zeros à esquerda, "" se não disponível
-    documento: str         # seu número sem zeros à esquerda
-    data: str              # DDMMAAAA
-    valor: float
-    ocorrencias: list[str] = field(default_factory=list)
+PAGO = Status.PAGO
+DEVOLUCAO = Status.DEVOLUCAO
+REJEITADO = Status.REJEITADO
+ACEITO_NAO_PAGO = Status.ACEITO_NAO_PAGO
+OUTRO_PAGAMENTO = Status.OUTRO_PAGAMENTO
+NAO_ENVIADO = Status.NAO_ENVIADO
 
-    @property
-    def ocorrencia_bruta(self) -> str:
-        return "".join(self.ocorrencias)
-
-
-@dataclass
-class Pagamento:
-    """Um item da lista a conferir (relatório do sistema)."""
-    favorecido: str
-    cpf_cnpj: str = ""
-    documento: str = ""
-    valor: float | None = None
-    data: str = ""         # DDMMAAAA
-    metodo: str = ""
-    referencia: str = ""
-    op: str = ""
-    situacao_sistema: str = ""
-    retorno_sistema: str = ""
-    situacao_banco: str = ""   # "Pago", "Com Erro"... no relatório do banco
-
-
-# Status possíveis da conferência
-PAGO = "pago"
-DEVOLUCAO = "devolucao"
-REJEITADO = "rejeitado"
-ACEITO_NAO_PAGO = "aceito_nao_pago"
-OUTRO_PAGAMENTO = "outro_pagamento"
-NAO_ENVIADO = "nao_enviado"
-
-ROTULOS = {
+ROTULOS: dict[Status, str] = {
     PAGO: "Pago",
     DEVOLUCAO: "Devolução",
     REJEITADO: "Rejeitado pelo banco",
@@ -68,16 +35,60 @@ ROTULOS = {
 }
 
 
-@dataclass
+@dataclass(slots=True)
+class ArquivoBanco:
+    nome: str
+    tipo: TipoArquivo
+    data: date | None
+    lote: int | None
+    empresa: str | None
+
+    @property
+    def ordem(self) -> tuple[date, int, str]:
+        return (self.data or date.min, self.lote or 0, self.nome)
+
+
+@dataclass(slots=True)
+class RegistroBanco:
+    arquivo: ArquivoBanco
+    segmento: Segmento
+    nome: str
+    cpf_cnpj: str
+    documento: str
+    data: str
+    valor: float
+    ocorrencias: list[str] = field(default_factory=list)
+
+    @property
+    def ocorrencia_bruta(self) -> str:
+        return "".join(self.ocorrencias)
+
+
+@dataclass(slots=True)
+class Pagamento:
+    favorecido: str
+    cpf_cnpj: str = ""
+    documento: str = ""
+    valor: float | None = None
+    data: str = ""
+    metodo: str = ""
+    referencia: str = ""
+    op: str = ""
+    situacao_sistema: str = ""
+    retorno_sistema: str = ""
+    situacao_banco: str = ""
+
+
+@dataclass(slots=True)
 class Resultado:
     pagamento: Pagamento
-    status: str
+    status: Status
     registros: list[RegistroBanco] = field(default_factory=list)
-    codigos: list[str] = field(default_factory=list)   # ocorrência que define o status (ex: ZAZ7)
-    arquivo_status: str = ""                             # arquivo que define o status
-    match_fraco: bool = False                            # achado só por nome + valor
+    codigos: list[str] = field(default_factory=list)
+    arquivo_status: str = ""
+    match_fraco: bool = False
     observacoes: list[str] = field(default_factory=list)
-    alerta_sistema: bool = False                         # sistema diz pago, banco não pagou
+    alerta_sistema: bool = False
 
     @property
     def rotulo(self) -> str:

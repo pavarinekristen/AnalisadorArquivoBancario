@@ -1,17 +1,17 @@
-"""Leitor dos arquivos CNAB 240 do Santander (MOV, CRI) e identificação dos demais."""
 from __future__ import annotations
 
 import re
 from datetime import date
 from pathlib import Path
 
-from .modelos import ArquivoBanco, RegistroBanco
+from .modelos import ArquivoBanco, RegistroBanco, TipoArquivo
 
 _NOME_FORN = re.compile(r"FORN_(?P<emp>[A-Z0-9]+)_(?P<lote>\d+)_(?P<data>\d{6})P_(?P<tipo>[A-Z]+)", re.I)
+_TIPOS_COM_LOTE: frozenset[str] = frozenset({"MOV", "CRI", "REL"})
+_TIPOS_COM_CONTEUDO: frozenset[str] = frozenset({"MOV", "CRI"})
 
 
 def identificar(nome: str) -> ArquivoBanco:
-    """Descobre tipo, data e lote pelo nome do arquivo."""
     base = Path(nome).name
     m = _NOME_FORN.search(base)
     if m:
@@ -21,9 +21,8 @@ def identificar(nome: str) -> ArquivoBanco:
         except ValueError:
             dt = None
         tipo = m.group("tipo").upper()
-        if tipo not in ("MOV", "CRI", "REL"):
-            tipo = "OUTRO"
-        return ArquivoBanco(base, tipo, dt, int(m.group("lote")), m.group("emp").upper())
+        tipo_final: TipoArquivo = tipo if tipo in _TIPOS_COM_LOTE else "OUTRO"
+        return ArquivoBanco(base, tipo_final, dt, int(m.group("lote")), m.group("emp").upper())
     if base.lower().startswith("retorno_"):
         return ArquivoBanco(base, "RETORNO", None, None, None)
     return ArquivoBanco(base, "OUTRO", None, None, None)
@@ -40,22 +39,23 @@ def _valor(s: str) -> float:
 
 def _ocorrencias(s: str) -> list[str]:
     s = s.strip()
-    return [s[i:i + 2] for i in range(0, len(s), 2) if s[i:i + 2].strip()]
+    return [par for i in range(0, len(s), 2) if (par := s[i:i + 2]).strip()]
+
+
+def _campo(linha: str, a: int, b: int) -> str:
+    return linha[a - 1:b]
 
 
 def ler_texto(texto: str, arquivo: ArquivoBanco) -> list[RegistroBanco]:
-    """Lê o conteúdo de um MOV/CRI e devolve os pagamentos (segmentos A e J)."""
-    linhas = texto.splitlines()
     regs: list[RegistroBanco] = []
     atual: RegistroBanco | None = None
-    for linha in linhas:
-        if len(linha) < 240:
-            linha = linha.ljust(240)
-        if linha[7] != "3":          # só registros de detalhe
+    for linha_bruta in texto.splitlines():
+        linha = linha_bruta.ljust(240) if len(linha_bruta) < 240 else linha_bruta
+        if linha[7] != "3":
             atual = None
             continue
         seg = linha[13]
-        c = lambda a, b: linha[a - 1:b]  # posições 1-based, como no layout
+        c = lambda a, b, _linha=linha: _campo(_linha, a, b)
         if seg == "A":
             atual = RegistroBanco(
                 arquivo=arquivo, segmento="A",
@@ -79,19 +79,20 @@ def ler_texto(texto: str, arquivo: ArquivoBanco) -> list[RegistroBanco]:
             )
             regs.append(atual)
         else:
-            atual = None if seg not in ("B", "C", "Z") else atual
+            atual = atual if seg in ("B", "C", "Z") else None
     return regs
 
 
 def ler_bytes(nome: str, conteudo: bytes) -> tuple[ArquivoBanco, list[RegistroBanco]]:
     arq = identificar(nome)
-    if arq.tipo not in ("MOV", "CRI"):
+    if arq.tipo not in _TIPOS_COM_CONTEUDO:
         return arq, []
     return arq, ler_texto(conteudo.decode("latin-1"), arq)
 
 
 def ler_pasta(pasta: str | Path) -> tuple[list[ArquivoBanco], list[RegistroBanco]]:
-    arquivos, regs = [], []
+    arquivos: list[ArquivoBanco] = []
+    regs: list[RegistroBanco] = []
     for p in sorted(Path(pasta).iterdir()):
         if not p.is_file():
             continue
@@ -104,12 +105,11 @@ def ler_pasta(pasta: str | Path) -> tuple[list[ArquivoBanco], list[RegistroBanco
 
 
 def lotes_faltando(arquivos: list[ArquivoBanco]) -> dict[str, list[int]]:
-    """Por empresa+data, lotes que faltam na sequência 1..maior lote."""
-    grupos: dict[tuple, set[int]] = {}
+    grupos: dict[tuple[str | None, date], set[int]] = {}
     for a in arquivos:
-        if a.lote is not None and a.data is not None and a.tipo in ("MOV", "CRI", "REL"):
+        if a.lote is not None and a.data is not None and a.tipo in _TIPOS_COM_LOTE:
             grupos.setdefault((a.empresa, a.data), set()).add(a.lote)
-    faltando = {}
+    faltando: dict[str, list[int]] = {}
     for (emp, dt), lotes in sorted(grupos.items()):
         falta = sorted(set(range(1, max(lotes) + 1)) - lotes)
         if falta:
