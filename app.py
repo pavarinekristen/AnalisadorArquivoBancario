@@ -2,20 +2,124 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from conferencia import area_transferencia, cnab240, historico, mensagem, motor, relatorio
+from conferencia import area_transferencia, cnab240, historico, mensagem, motor, ntedi, relatorio
 from conferencia.modelos import (ACEITO_NAO_PAGO, DEVOLUCAO, NAO_ENVIADO, OUTRO_PAGAMENTO, PAGO,
                                  REJEITADO, ROTULOS)
 
-st.set_page_config(page_title="Conferência de Pagamentos", layout="wide")
+ASSETS = Path(__file__).parent / "assets"
 
-CORES = {PAGO: "🟢", DEVOLUCAO: "🟡", REJEITADO: "🔴", NAO_ENVIADO: "🔴",
-         ACEITO_NAO_PAGO: "🔵", OUTRO_PAGAMENTO: "⚪"}
+st.set_page_config(page_title="Conferência de Pagamentos", page_icon=str(ASSETS / "techone_icon.jpg"),
+                   layout="wide")
+
+CORES_HEX = {PAGO: "#16A34A", DEVOLUCAO: "#D97706", REJEITADO: "#DC2626", NAO_ENVIADO: "#DC2626",
+             ACEITO_NAO_PAGO: "#0059A9", OUTRO_PAGAMENTO: "#6B7280"}
+
+_ESTILO = """
+<style>
+[data-testid="stSidebar"] {
+    background-color: #050D32;
+}
+[data-testid="stSidebar"] * {
+    color: #E7ECF7 !important;
+}
+[data-testid="stSidebarNav"] a[aria-selected="true"] {
+    background: rgba(0,89,169,.35);
+    border-left: 3px solid #2AADD7;
+    border-radius: 6px;
+}
+[data-testid="stSidebarNav"] a:hover {
+    background: rgba(42,173,215,.12);
+    border-radius: 6px;
+}
+[data-testid="stLogo"] {
+    padding: 0.75rem 0.5rem 1rem 0.5rem;
+}
+.stButton>button[kind="primary"], .stDownloadButton>button {
+    background: linear-gradient(90deg, #0059A9, #0B6FA0);
+    border: none;
+    font-weight: 600;
+}
+.stButton>button[kind="primary"]:hover, .stDownloadButton>button:hover {
+    filter: brightness(1.08);
+}
+div[role="radiogroup"] {
+    gap: 0.4rem;
+}
+div[role="radiogroup"] label {
+    background: #F2F5FA;
+    border: 1px solid #E2E8F4;
+    border-radius: 999px;
+    padding: 0.25rem 0.9rem;
+}
+.passo {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.3rem 0 0.7rem 0;
+}
+.passo-numero {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0059A9, #0B6FA0);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+.passo-titulo {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #0B1E3A;
+}
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+.kpi-card {
+    background: #F2F5FA;
+    border-left: 4px solid;
+    border-radius: 10px;
+    padding: 0.9rem 1rem;
+    box-shadow: 0 1px 2px rgba(11,30,58,0.06);
+}
+.kpi-valor {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #0B1E3A;
+    line-height: 1.1;
+}
+.kpi-rotulo {
+    font-size: 0.85rem;
+    color: #44546B;
+    margin-top: 2px;
+}
+.kpi-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+</style>
+"""
+st.markdown(_ESTILO, unsafe_allow_html=True)
+
+
+def _passo(numero: int, titulo: str) -> None:
+    st.markdown(f'<div class="passo"><span class="passo-numero">{numero}</span>'
+                f'<span class="passo-titulo">{titulo}</span></div>', unsafe_allow_html=True)
 
 
 def _fmt_valor(v) -> str:
@@ -46,7 +150,6 @@ def _devolucao_mov(r) -> str:
 
 def tabela(resultados) -> pd.DataFrame:
     return pd.DataFrame([{
-        "": CORES[r.status],
         "Favorecido": r.pagamento.favorecido,
         "CPF/CNPJ": r.pagamento.cpf_cnpj,
         "Documento": r.pagamento.documento,
@@ -59,14 +162,14 @@ def tabela(resultados) -> pd.DataFrame:
         "Significado": motor.descrever_varios([c for cod in r.codigos for c in cnab240._ocorrencias(cod)]),
         "Arquivo": r.arquivo_status,
         "Nome no banco": r.registros[-1].nome if r.registros else "",
-        "Sistema diz pago?": "⚠ Sim" if r.alerta_sistema else "",
+        "Sistema diz pago?": "Sim — confirmar com o banco" if r.alerta_sistema else "",
         "Obs.": " | ".join(r.observacoes),
     } for r in resultados])
 
 
 def excel_resultado(df: pd.DataFrame) -> bytes:
     buf = io.BytesIO()
-    df.drop(columns=[""]).to_excel(buf, index=False, sheet_name="Conferência")
+    df.to_excel(buf, index=False, sheet_name="Conferência")
     return buf.getvalue()
 
 
@@ -75,10 +178,10 @@ def escolher_lista(nome_arquivo: str, conteudo: bytes):
     try:
         listas = relatorio.ler_excel(conteudo)
     except Exception as e:  # arquivo corrompido, protegido etc.
-        st.error(f"Não consegui ler o Excel: {e}")
+        st.error(f"Não consegui ler o Excel: {e}", icon=":material/error:")
         return [], ""
     if not listas:
-        st.warning("Não reconheci nenhuma aba (BANCO, RESUMO ou SISTEMA) nesse Excel.")
+        st.warning("Não reconheci nenhuma aba (BANCO, RESUMO ou SISTEMA) nesse Excel.", icon=":material/warning:")
         return [], ""
     nomes = list(listas)
     padrao = next((i for i, n in enumerate(nomes) if "banco" in n), 0)
@@ -87,22 +190,20 @@ def escolher_lista(nome_arquivo: str, conteudo: bytes):
     return listas[escolha], f"{nome_arquivo} / {escolha}"
 
 
-# ------------------------------------------------------------------ entrada
-st.title("Conferência de Pagamentos")
-aba_conf, aba_hist, aba_cod = st.tabs(["Conferir", "Histórico", "Códigos de ocorrência"])
-
-with aba_conf:
+# ------------------------------------------------------------------ página: Conferir
+def pagina_conferir() -> None:
     with st.container(border=True):
         st.markdown("**Jeito mais rápido:** selecione no Explorer o Excel e todos os arquivos do banco "
                     "(ou a pasta inteira), aperte **Ctrl+C** e clique em Colar.")
         b1, b2, _ = st.columns([1, 1, 3])
-        if b1.button("📋 Colar arquivos copiados", type="primary"):
+        if b1.button("Colar arquivos copiados", type="primary", icon=":material/content_paste:"):
             copiados = area_transferencia.arquivos_copiados()
             if copiados:
                 st.session_state["colados"] = copiados
                 st.session_state.pop("resultados", None)
             else:
-                st.warning("Nada copiado. Selecione os arquivos no Explorer e aperte Ctrl+C antes.")
+                st.warning("Nada copiado. Selecione os arquivos no Explorer e aperte Ctrl+C antes.",
+                          icon=":material/warning:")
         if st.session_state.get("colados") and b2.button("Limpar colados"):
             st.session_state.pop("colados")
             st.session_state.pop("resultados", None)
@@ -115,7 +216,7 @@ with aba_conf:
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("1. Quem conferir")
+        _passo(1, "Quem conferir")
         pagamentos, nome_relatorio = [], ""
         opcoes = ["Digitar nomes", "Excel", "Colar lista do sistema"]
         modo_rel = st.radio("Como vai informar os favorecidos?", opcoes, horizontal=True,
@@ -130,7 +231,7 @@ with aba_conf:
                 pagamentos, nome_relatorio = relatorio.ler_nomes_digitados(texto), "nomes digitados"
         elif modo_rel == "Excel":
             if excel_colado:
-                st.success(f"Excel colado: {excel_colado.name}")
+                st.success(f"Excel colado: {excel_colado.name}", icon=":material/check_circle:")
                 pagamentos, nome_relatorio = escolher_lista(excel_colado.name, excel_colado.read_bytes())
             else:
                 xl = st.file_uploader("Arraste o Excel do relatório", type=["xlsx", "xlsm"])
@@ -141,12 +242,12 @@ with aba_conf:
             if texto.strip():
                 pagamentos, nome_relatorio = relatorio.ler_texto_colado(texto), "lista colada"
                 if not pagamentos:
-                    st.warning("Não reconheci nenhum pagamento no texto colado.")
+                    st.warning("Não reconheci nenhum pagamento no texto colado.", icon=":material/warning:")
         if pagamentos:
             st.caption(f"{len(pagamentos)} favorecido(s) para conferir.")
 
     with col2:
-        st.subheader("2. Arquivos do banco")
+        _passo(2, "Arquivos do banco")
         arquivos, registros = [], []
         if banco_colados:
             for c in banco_colados:
@@ -154,10 +255,28 @@ with aba_conf:
                 if arq.tipo != "OUTRO":
                     arquivos.append(arq)
                     registros.extend(regs)
-            st.success(f"{len(banco_colados)} arquivos colados.")
+            st.success(f"{len(banco_colados)} arquivos colados.", icon=":material/check_circle:")
         else:
-            modo_arq = st.radio("Como vai informar os arquivos?", ["Arrastar arquivos", "Pasta"], horizontal=True)
-            if modo_arq == "Arrastar arquivos":
+            modo_arq = st.radio(
+                "Como vai informar os arquivos?",
+                ["Pasta padrão (rede)", "Arrastar arquivos", "Caminho manual (avançado)"], horizontal=True)
+            if modo_arq == "Pasta padrão (rede)":
+                tipo_pasta = st.radio("Retorno ou remessa?", ["retorno", "remessa"], horizontal=True,
+                                      format_func=lambda t: f"{ntedi.ROTULOS[t]} ({'INBOXENV' if t == 'retorno' else 'SENTBOX'})")
+                subpasta = st.text_input("Nome da subpasta (ex.: GE202255)")
+                col_de, col_ate = st.columns(2)
+                de = col_de.date_input("De", value=date.today() - timedelta(days=7))
+                ate = col_ate.date_input("Até", value=date.today())
+                if subpasta:
+                    with st.spinner("Lendo arquivos da rede..."):
+                        resultado = ntedi.ler_subpasta(tipo_pasta, subpasta, de, ate)
+                    arquivos, registros = resultado.arquivos, resultado.registros
+                    for aviso in resultado.avisos:
+                        st.warning(aviso, icon=":material/warning:")
+                    if resultado.total_ignorados_data:
+                        st.caption(f"{resultado.total_ignorados_data} arquivo(s) fora do intervalo "
+                                   "de data foram ignorados.")
+            elif modo_arq == "Arrastar arquivos":
                 ups = st.file_uploader("Arraste TODOS os arquivos da pasta (MOV, CRI, Retorno...)",
                                        accept_multiple_files=True)
                 for u in ups or []:
@@ -172,15 +291,17 @@ with aba_conf:
                     if p.is_dir():
                         arquivos, registros = cnab240.ler_pasta(p)
                     else:
-                        st.error("Pasta não encontrada.")
+                        st.error("Pasta não encontrada.", icon=":material/error:")
         if arquivos:
             tipos = pd.Series([a.tipo for a in arquivos]).value_counts().to_dict()
             st.caption(f"{len(arquivos)} arquivos ({', '.join(f'{v} {k}' for k, v in tipos.items())}), "
                        f"{len(registros)} pagamentos lidos.")
             if "MOV" not in tipos:
-                st.warning("Nenhum arquivo MOV. Sem MOV não dá para saber se foi pago ou devolvido.")
+                st.warning("Nenhum arquivo MOV. Sem MOV não dá para saber se foi pago ou devolvido.",
+                          icon=":material/warning:")
             if "CRI" not in tipos:
-                st.info("Nenhum arquivo CRI. Não dá para ver rejeições na crítica do banco.")
+                st.info("Nenhum arquivo CRI. Não dá para ver rejeições na crítica do banco.",
+                       icon=":material/info:")
             # Só um lembrete, não impede a conferência: às vezes o banco realmente não gera o lote.
             # Se o relatório tem datas, só interessam arquivos da data do pagamento em diante
             # (a devolução chega depois).
@@ -193,7 +314,8 @@ with aba_conf:
                     f"{grupo} → {', '.join(f'{l:02d}' for l in lotes)}" for grupo, lotes in faltando.items()))
 
     pronto = bool(pagamentos and arquivos)
-    if st.button("CONFERIR", type="primary", disabled=not pronto, width="stretch"):
+    if st.button("CONFERIR", type="primary", disabled=not pronto, width="stretch",
+                icon=":material/fact_check:"):
         if modo_rel == "Digitar nomes":
             resultados = motor.pesquisar(pagamentos, registros)   # um resultado por pagamento achado
         else:
@@ -204,6 +326,7 @@ with aba_conf:
         st.session_state["anteriores"] = anteriores
         st.session_state["msg"] = (mensagem.montar_pesquisa(resultados) if modo_rel == "Digitar nomes"
                                    else mensagem.montar(resultados))
+        st.toast(f"Conferência concluída: {len(resultados)} favorecido(s).", icon=":material/task_alt:")
     elif not pronto:
         st.caption("Informe os favorecidos e os arquivos para liberar o botão.")
 
@@ -213,15 +336,22 @@ with aba_conf:
         st.divider()
         st.subheader(f"Resultado: {len(resultados)} favorecidos")
         cont = pd.Series([r.status for r in resultados]).value_counts()
-        cols = st.columns(6)
-        for c, status in zip(cols, [DEVOLUCAO, PAGO, REJEITADO, NAO_ENVIADO, ACEITO_NAO_PAGO, OUTRO_PAGAMENTO]):
-            c.metric(f"{CORES[status]} {ROTULOS[status]}", int(cont.get(status, 0)))
+        ordem = [DEVOLUCAO, PAGO, REJEITADO, NAO_ENVIADO, ACEITO_NAO_PAGO, OUTRO_PAGAMENTO]
+        cards = "".join(
+            f'<div class="kpi-card" style="border-left-color:{CORES_HEX[status]}">'
+            f'<div class="kpi-valor">{int(cont.get(status, 0))}</div>'
+            f'<div class="kpi-rotulo"><span class="kpi-dot" style="background:{CORES_HEX[status]}"></span>'
+            f'{ROTULOS[status]}</div></div>'
+            for status in ordem)
+        st.markdown(f'<div class="kpi-grid">{cards}</div>', unsafe_allow_html=True)
 
         alertas = sum(r.alerta_sistema for r in resultados)
         if alertas:
-            st.error(f"⚠ {alertas} favorecido(s) aparecem como pagos no sistema, mas o banco não pagou.")
+            st.error(f"{alertas} favorecido(s) aparecem como pagos no sistema, mas o banco não pagou.",
+                    icon=":material/error:")
         for nome, n in st.session_state.get("anteriores", {}).items():
-            st.warning(f"Reincidência: {nome} já teve {n} devolução(ões) em conferências anteriores.")
+            st.warning(f"Reincidência: {nome} já teve {n} devolução(ões) em conferências anteriores.",
+                      icon=":material/warning:")
 
         df = tabela(resultados)
         filtro = st.multiselect("Filtrar status", sorted(df["Status"].unique()), placeholder="Todos os status")
@@ -248,7 +378,7 @@ with aba_conf:
                     "Significado": motor.descrever_varios(x.ocorrencias),
                 } for x in r.registros]), width="stretch", hide_index=True)
             else:
-                st.info("Não aparece em nenhum arquivo.")
+                st.info("Não aparece em nenhum arquivo.", icon=":material/info:")
             for o in r.observacoes:
                 st.caption(f"• {o}")
 
@@ -260,7 +390,9 @@ with aba_conf:
                            file_name="conferencia.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-with aba_hist:
+
+# ------------------------------------------------------------------ página: Histórico
+def pagina_historico() -> None:
     st.subheader("Histórico de conferências")
     busca = st.text_input("Buscar por nome, CPF/CNPJ ou documento")
     st.dataframe(historico.buscar(busca), width="stretch", hide_index=True)
@@ -271,7 +403,9 @@ with aba_hist:
     else:
         st.dataframe(rein, width="stretch", hide_index=True)
 
-with aba_cod:
+
+# ------------------------------------------------------------------ página: Códigos de ocorrência
+def pagina_codigos() -> None:
     st.subheader("Tabela de ocorrências")
     st.caption("Fonte: regras/ocorrencias.yaml (dá para editar e acrescentar códigos).")
     busca_cod = st.text_input("Buscar código ou texto").strip().upper()
@@ -281,3 +415,16 @@ with aba_cod:
         df_cod = df_cod[df_cod.apply(lambda r: busca_cod in r["Código"] or
                                      busca_cod in relatorio.sem_acento(r["Descrição"]), axis=1)]
     st.dataframe(df_cod, width="stretch", hide_index=True)
+
+
+# ------------------------------------------------------------------ entrada
+st.logo(str(ASSETS / "techone_banner.jpg"), icon_image=str(ASSETS / "techone_icon.jpg"))
+
+pagina = st.navigation([
+    st.Page(pagina_conferir, title="Conferir", icon=":material/fact_check:", default=True),
+    st.Page(pagina_historico, title="Histórico", icon=":material/history:"),
+    st.Page(pagina_codigos, title="Códigos de ocorrência", icon=":material/menu_book:"),
+])
+st.title("Conferência de Pagamentos")
+
+pagina.run()
