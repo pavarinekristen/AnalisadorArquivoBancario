@@ -6,6 +6,10 @@
 #   {arquivos}  arquivo(s) onde foram encontrados
 #   {codigos}   códigos de ocorrência (ex: ZA, ZAZ7 e ZAAE)
 #   {nomes}     lista de nomes
+#   {esta}      "está" ou "estão" (conforme {n})
+#   {foi}       "foi" ou "foram" (conforme {n})
+#   {s} {m}     "" ou "s" / "" ou "m" para o plural (ex: pago{s}, aparece{m})
+#   {detalhes}  (pesquisa por nomes) uma linha por favorecido com o que foi encontrado
 
 # Quando TODOS caem no mesmo grupo
 todos:
@@ -19,9 +23,19 @@ todos:
 # Quando há grupos misturados: abertura + uma linha por grupo presente
 abertura: "{saudacao}. Fiz a análise dos {total} favorecidos do relatório."
 grupos:
-  devolucao: "{n} estão no arquivo {arquivos} com código de devolução ({codigos}): {nomes}."
-  pago: "{n} estão pagos (código 00): {nomes}."
-  rejeitado: "{n} foram rejeitados pelo banco ({codigos}): {nomes}."
-  aceito_nao_pago: "{n} foram aceitos pelo banco, mas ainda não aparecem como pagos: {nomes}."
-  outro_pagamento: "{n} aparecem nos arquivos, mas com valor, data ou documento diferente: {nomes}."
-  nao_enviado: "{n} não estão em nenhum arquivo, não foram enviados ao banco: {nomes}."
+  devolucao: "{n} {esta} no arquivo {arquivos} com código de devolução ({codigos}): {nomes}."
+  pago: "{n} {esta} pago{s} (código 00): {nomes}."
+  rejeitado: "{n} {foi} rejeitado{s} pelo banco ({codigos}): {nomes}."
+  aceito_nao_pago: "{n} {foi} aceito{s} pelo banco, mas ainda não aparece{m} como pago{s}: {nomes}."
+  outro_pagamento: "{n} aparece{m} nos arquivos, mas com valor, data ou documento diferente: {nomes}."
+  nao_enviado: "{n} não {esta} em nenhum arquivo, não {foi} enviado{s} ao banco: {nomes}."
+
+# Pesquisa por nomes digitados (o mesmo nome pode ter vários pagamentos nos arquivos)
+pesquisa:
+  abertura: "{saudacao}. Fiz a análise dos nomes dos favorecidos nos arquivos do banco."
+  devolucao: "{nome}: devolução ({codigos}) no arquivo {arquivo}, valor {valor}."
+  pago: "{nome}: pago (00) no arquivo {arquivo}, valor {valor}."
+  rejeitado: "{nome}: rejeitado pelo banco ({codigos}) no arquivo {arquivo}, valor {valor}."
+  aceito_nao_pago: "{nome}: aceito pelo banco ({codigos}) no arquivo {arquivo}, ainda não pago, valor {valor}."
+  outro_pagamento: "{nome}: aparece nos arquivos com outro valor, data ou documento."
+  nao_enviado: "{nome}: não está em nenhum arquivo, não foi enviado ao banco."

@@ -46,6 +46,8 @@ def montar(resultados: list[Resultado], agora: datetime | None = None,
             arquivos=_juntar(sorted({_arquivo_curto(r.arquivo_status) for r in rs})),
             codigos=_juntar(sorted({c for r in rs for c in r.codigos})),
             nomes=_juntar([r.pagamento.favorecido for r in rs]),
+            esta="está" if len(rs) == 1 else "estão", foi="foi" if len(rs) == 1 else "foram",
+            s="" if len(rs) == 1 else "s", m="" if len(rs) == 1 else "m",
         )
 
     if len(grupos) == 1:
@@ -57,3 +59,27 @@ def montar(resultados: list[Resultado], agora: datetime | None = None,
         if status in grupos:
             linhas.append(modelos["grupos"][status].format(**campos(grupos[status])))
     return "\n\n".join(linhas)
+
+
+def _valor_br(v) -> str:
+    return "-" if v is None else f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def montar_pesquisa(resultados: list[Resultado], agora: datetime | None = None,
+                    caminho_modelos: Path = _MODELOS) -> str:
+    """Mensagem da pesquisa por nomes: se todos deram devolução, uma frase só; senão, uma linha por pagamento."""
+    if not resultados:
+        return ""
+    nomes = list(dict.fromkeys(r.pagamento.favorecido for r in resultados))
+    um_por_nome = len(nomes) == len(resultados)
+    if um_por_nome and len({r.status for r in resultados}) == 1:
+        return montar(resultados, agora, caminho_modelos)
+
+    with open(caminho_modelos, encoding="utf-8") as f:
+        modelos = yaml.safe_load(f)["pesquisa"]
+    linhas = [modelos["abertura"].format(saudacao=saudacao(agora))]
+    for r in resultados:
+        linhas.append(modelos[r.status].format(
+            nome=r.pagamento.favorecido, codigos=" ".join(r.codigos),
+            arquivo=_arquivo_curto(r.arquivo_status), valor=_valor_br(r.pagamento.valor)))
+    return "\n".join(linhas)

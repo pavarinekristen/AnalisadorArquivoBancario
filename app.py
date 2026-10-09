@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -25,6 +26,24 @@ def _fmt_data(d: str) -> str:
     return f"{d[0:2]}/{d[2:4]}/{d[4:8]}" if len(d) == 8 and d.isdigit() else d
 
 
+def _sem_ext(nome: str) -> str:
+    return nome[:-4] if nome.upper().endswith(".TXT") else nome
+
+
+def _codigos_arquivos(r, tipo: str, filtro=lambda x: True) -> str:
+    """Ex: 'BD em FORN_EZN1_02_071026P_CRI'. Só do pagamento conferido (não de outros pagamentos)."""
+    if r.status == OUTRO_PAGAMENTO:
+        return ""
+    return " | ".join(f"{x.ocorrencia_bruta or '-'} em {_sem_ext(x.arquivo.nome)}"
+                      for x in r.registros if x.arquivo.tipo == tipo and filtro(x))
+
+
+def _devolucao_mov(r) -> str:
+    dev = _codigos_arquivos(r, "MOV", lambda x: x.ocorrencias[:1] and (x.ocorrencias[0].startswith("Z")
+                                                                       or "XD" in x.ocorrencias))
+    return f"Sim: {dev}" if dev else "Não"
+
+
 def tabela(resultados) -> pd.DataFrame:
     return pd.DataFrame([{
         "": CORES[r.status],
@@ -33,6 +52,9 @@ def tabela(resultados) -> pd.DataFrame:
         "Documento": r.pagamento.documento,
         "Valor": _fmt_valor(r.pagamento.valor),
         "Status": r.rotulo,
+        "CRI (código e arquivo)": _codigos_arquivos(r, "CRI") or "Não está em CRI",
+        "MOV pago (00)": _codigos_arquivos(r, "MOV", lambda x: x.ocorrencias[:1] in (["00"], ["03"])) or "Não",
+        "Devolução no MOV (Z...)": _devolucao_mov(r),
         "Código": " ".join(r.codigos),
         "Significado": motor.descrever_varios([c for cod in r.codigos for c in cnab240._ocorrencias(cod)]),
         "Arquivo": r.arquivo_status,
@@ -93,25 +115,35 @@ with aba_conf:
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("1. Relatório")
+        st.subheader("1. Quem conferir")
         pagamentos, nome_relatorio = [], ""
-        if excel_colado:
-            st.success(f"Excel colado: {excel_colado.name}")
-            pagamentos, nome_relatorio = escolher_lista(excel_colado.name, excel_colado.read_bytes())
-        else:
-            modo_rel = st.radio("Como vai informar a lista?", ["Excel", "Colar lista"], horizontal=True)
-            if modo_rel == "Excel":
+        opcoes = ["Digitar nomes", "Excel", "Colar lista do sistema"]
+        modo_rel = st.radio("Como vai informar os favorecidos?", opcoes, horizontal=True,
+                            index=1 if excel_colado else 0)
+        if modo_rel == "Digitar nomes":
+            texto = st.text_area(
+                "Um favorecido por linha. Pode ser o nome (inteiro ou parte), CPF/CNPJ ou nº do documento. "
+                "Se quiser, acrescente o valor (ex: 1.234,56) ou a data (ex: 07/10/2026) para filtrar.",
+                height=220, placeholder="FULANO DE TAL DA SILVA\nCICLANO 11.222.333/0001-81\n"
+                                        "BELTRANO SOUZA 1.234,56\n100009000000001")
+            if texto.strip():
+                pagamentos, nome_relatorio = relatorio.ler_nomes_digitados(texto), "nomes digitados"
+        elif modo_rel == "Excel":
+            if excel_colado:
+                st.success(f"Excel colado: {excel_colado.name}")
+                pagamentos, nome_relatorio = escolher_lista(excel_colado.name, excel_colado.read_bytes())
+            else:
                 xl = st.file_uploader("Arraste o Excel do relatório", type=["xlsx", "xlsm"])
                 if xl:
                     pagamentos, nome_relatorio = escolher_lista(xl.name, xl.getvalue())
-            else:
-                texto = st.text_area("Cole aqui a lista do sistema (Situação: Com Erro)", height=220)
-                if texto.strip():
-                    pagamentos, nome_relatorio = relatorio.ler_texto_colado(texto), "lista colada"
-                    if not pagamentos:
-                        st.warning("Não reconheci nenhum pagamento no texto colado.")
+        else:
+            texto = st.text_area("Cole aqui a lista do sistema (Situação: Com Erro)", height=220)
+            if texto.strip():
+                pagamentos, nome_relatorio = relatorio.ler_texto_colado(texto), "lista colada"
+                if not pagamentos:
+                    st.warning("Não reconheci nenhum pagamento no texto colado.")
         if pagamentos:
-            st.caption(f"{len(pagamentos)} favorecidos carregados.")
+            st.caption(f"{len(pagamentos)} favorecido(s) para conferir.")
 
     with col2:
         st.subheader("2. Arquivos do banco")
@@ -149,20 +181,31 @@ with aba_conf:
                 st.warning("Nenhum arquivo MOV. Sem MOV não dá para saber se foi pago ou devolvido.")
             if "CRI" not in tipos:
                 st.info("Nenhum arquivo CRI. Não dá para ver rejeições na crítica do banco.")
-            for grupo, lotes in cnab240.lotes_faltando(arquivos).items():
-                st.warning(f"Faltam arquivos na sequência {grupo}: lote(s) "
-                           f"{', '.join(f'{l:02d}' for l in lotes)}. O resultado pode estar incompleto.")
+            # Só um lembrete, não impede a conferência: às vezes o banco realmente não gera o lote.
+            # Se o relatório tem datas, só interessam arquivos da data do pagamento em diante
+            # (a devolução chega depois).
+            datas = [datetime.strptime(p.data, "%d%m%Y").date() for p in pagamentos
+                     if len(p.data) == 8 and p.data.isdigit()]
+            relevantes = [a for a in arquivos if not datas or (a.data and a.data >= min(datas))]
+            faltando = cnab240.lotes_faltando(relevantes)
+            if faltando:
+                st.caption("Obs.: lote(s) fora da sequência, confira se não faltou baixar algum: " + "; ".join(
+                    f"{grupo} → {', '.join(f'{l:02d}' for l in lotes)}" for grupo, lotes in faltando.items()))
 
     pronto = bool(pagamentos and arquivos)
     if st.button("CONFERIR", type="primary", disabled=not pronto, width="stretch"):
-        resultados = motor.conferir(pagamentos, registros)
+        if modo_rel == "Digitar nomes":
+            resultados = motor.pesquisar(pagamentos, registros)   # um resultado por pagamento achado
+        else:
+            resultados = motor.conferir(pagamentos, registros)
         anteriores = historico.devolucoes_anteriores(resultados)
         historico.salvar(resultados, nome_relatorio, [a.nome for a in arquivos])
         st.session_state["resultados"] = resultados
         st.session_state["anteriores"] = anteriores
-        st.session_state["msg"] = mensagem.montar(resultados)
+        st.session_state["msg"] = (mensagem.montar_pesquisa(resultados) if modo_rel == "Digitar nomes"
+                                   else mensagem.montar(resultados))
     elif not pronto:
-        st.caption("Carregue o relatório e os arquivos para liberar o botão.")
+        st.caption("Informe os favorecidos e os arquivos para liberar o botão.")
 
     # ------------------------------------------------------------------ resultado
     resultados = st.session_state.get("resultados")
@@ -184,9 +227,13 @@ with aba_conf:
         filtro = st.multiselect("Filtrar status", sorted(df["Status"].unique()))
         st.dataframe(df[df["Status"].isin(filtro)] if filtro else df, width="stretch", hide_index=True)
 
-        escolhido = st.selectbox("Ver detalhes de:", [""] + [r.pagamento.favorecido for r in resultados])
-        if escolhido:
-            r = next(x for x in resultados if x.pagamento.favorecido == escolhido)
+        escolhido = st.selectbox(
+            "Ver detalhes de:", [None] + list(range(len(resultados))),
+            format_func=lambda i: "" if i is None else
+            f"{resultados[i].pagamento.favorecido} — {_fmt_valor(resultados[i].pagamento.valor)} — "
+            f"{resultados[i].rotulo}")
+        if escolhido is not None:
+            r = resultados[escolhido]
             p = r.pagamento
             st.markdown(f"**{p.favorecido}** — {r.rotulo}  \n"
                         f"Relatório: doc `{p.documento or '-'}` · CPF/CNPJ `{p.cpf_cnpj or '-'}` · "

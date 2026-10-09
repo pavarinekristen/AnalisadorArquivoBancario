@@ -197,3 +197,48 @@ def ler_texto_colado(texto: str) -> list[Pagamento]:
                 pags.append(Pagamento(**atual, documento=d.group(1), valor=valor, op=op,
                                       situacao_banco=situacao))
     return pags
+
+
+# ---------------------------------------------------------------- nomes digitados
+
+_VALOR_TXT = re.compile(r"(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}|(?:R\$\s*)?\d+,\d{2}")
+_DATA_TXT = re.compile(r"\d{2}/\d{2}/\d{4}")
+
+
+def ler_nomes_digitados(texto: str) -> list[Pagamento]:
+    """Uma pesquisa por linha. Pode ter nome, CPF/CNPJ, nº documento, valor e data, em qualquer ordem.
+
+    Ex:  FULANO DE TAL DA SILVA
+         CICLANO 11222333000181
+         BELTRANO SOUZA 1.234,56
+         100009000000001
+    """
+    pags = []
+    for linha in texto.splitlines():
+        resto = linha.strip()
+        if not resto:
+            continue
+        valor = data = doc = cpf = ""
+        m = _VALOR_TXT.search(resto)
+        if m:
+            valor = m.group(0)
+            resto = resto.replace(valor, " ")
+        m = _DATA_TXT.search(resto)
+        if m:
+            data = _data(m.group(0))
+            resto = resto.replace(m.group(0), " ")
+        # CPF/CNPJ podem vir com pontuação: 11.222.333/0001-81, 123.456.789-09
+        for m in re.finditer(r"\d[\d./-]{9,}\d", resto):
+            dig = re.sub(r"\D", "", m.group(0))
+            if len(dig) == 15 and dig.startswith("10000"):
+                doc = dig
+            elif len(dig) in (11, 14):
+                cpf = dig.lstrip("0")
+            else:
+                continue
+            resto = resto.replace(m.group(0), " ")
+        nome = " ".join(re.sub(r"[;|/\t,]", " ", resto).split())
+        if nome or doc or cpf:
+            pags.append(Pagamento(favorecido=nome or doc or cpf, cpf_cnpj=cpf, documento=doc,
+                                  valor=_valor_br(valor), data=data))
+    return pags

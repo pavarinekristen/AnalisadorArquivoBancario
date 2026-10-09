@@ -187,3 +187,83 @@ def classificar(p: Pagamento, achados: list[RegistroBanco], fraco: bool,
 def conferir(pagamentos: list[Pagamento], registros: list[RegistroBanco]) -> list[Resultado]:
     idx = Indice(registros)
     return [classificar(p, *idx.buscar(p)) for p in pagamentos]
+
+
+# ---------------------------------------------------------------- pesquisa por nome digitado
+
+_PALAVRAS_IGNORADAS = {"DE", "DA", "DO", "DAS", "DOS", "E", "LTDA", "ME", "EPP", "SA", "S", "A", "EIRELI"}
+
+
+def _palavras(nome: str, manter_iniciais: bool = False) -> list[str]:
+    """Palavras significativas. No nome do banco as letras soltas ficam: podem ser iniciais (F SOUZA = FULANO SOUZA)."""
+    return [w for w in nome_normalizado(nome).split()
+            if w not in _PALAVRAS_IGNORADAS or (manter_iniciais and len(w) == 1)]
+
+
+def nome_bate(digitado: str, nome_banco: str) -> bool:
+    """Cada palavra digitada precisa aparecer no nome do banco: igual, abreviada pelo banco
+    (inicial, ex: FULANO -> F) ou cortada no fim (o banco trunca em 30 caracteres).
+    Pelo menos uma palavra tem que bater inteira, para não achar só por iniciais."""
+    procuradas, banco = _palavras(digitado), _palavras(nome_banco, manter_iniciais=True)
+    if not procuradas or not banco:
+        return False
+    # Nome com 30 caracteres foi cortado pelo banco: as ÚLTIMAS palavras digitadas podem não estar lá.
+    truncado = len(nome_banco.strip()) >= 28
+    inteiras, ultimo, faltando = 0, -1, 0
+    for w in procuradas:
+        achou = None
+        # as palavras precisam aparecer na mesma ordem do nome
+        for i in range(ultimo + 1, len(banco)):
+            b = banco[i]
+            if b == w:
+                achou, inteiras = i, inteiras + 1
+                break
+            if len(b) >= 3 and w.startswith(b) and i == len(banco) - 1:   # truncado no fim
+                achou = i
+                break
+            if len(b) == 1 and w[0] == b:                                   # abreviado (inicial)
+                achou = i
+                break
+        if achou is None:
+            if not truncado:
+                return False
+            faltando += 1
+            continue
+        if faltando:          # palavra achada depois de uma que faltou: não é corte no fim
+            return False
+        ultimo = achou
+    return inteiras >= (2 if faltando else 1)
+
+
+def pesquisar(pesquisas: list[Pagamento], registros: list[RegistroBanco]) -> list[Resultado]:
+    """Para cada nome/CPF/documento digitado, devolve um resultado por pagamento encontrado nos arquivos."""
+    idx = Indice(registros)
+    resultados: list[Resultado] = []
+    for p in pesquisas:
+        if p.documento:
+            achados = idx.por_doc.get(p.documento.lstrip("0"), [])
+        elif p.cpf_cnpj:
+            achados = idx.por_cpf.get(p.cpf_cnpj.lstrip("0"), [])
+            if not achados and p.favorecido != p.cpf_cnpj:
+                achados = [r for r in registros if nome_bate(p.favorecido, r.nome)]
+        else:
+            achados = [r for r in registros if nome_bate(p.favorecido, r.nome)]
+        if p.valor is not None:
+            achados = [r for r in achados if _valor_igual(r.valor, p.valor)]
+        if p.data:
+            achados = [r for r in achados if r.data == p.data]
+
+        if not achados:
+            resultados.append(classificar(p, [], False, []))
+            continue
+        grupos: dict[str, list[RegistroBanco]] = {}
+        for r in achados:
+            grupos.setdefault(_chave_pagamento(r), []).append(r)
+        for regs in sorted(grupos.values(), key=lambda rs: max(r.arquivo.ordem for r in rs), reverse=True):
+            um = Pagamento(favorecido=p.favorecido, cpf_cnpj=regs[0].cpf_cnpj or p.cpf_cnpj,
+                           documento=regs[0].documento, valor=regs[0].valor, data=regs[0].data)
+            res = classificar(um, regs, False, [])
+            if len(grupos) > 1:
+                res.observacoes.insert(0, f"Favorecido tem {len(grupos)} pagamentos nos arquivos.")
+            resultados.append(res)
+    return resultados
