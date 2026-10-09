@@ -1,0 +1,27 @@
+# Modelos da mensagem pro chefe (WhatsApp, sem emoji, direto).
+# Pode editar o texto à vontade. Campos entre chaves são preenchidos pelo programa:
+#   {saudacao}  Bom dia / Boa tarde / Boa noite
+#   {n}         quantidade de favorecidos daquele grupo
+#   {total}     quantidade total do relatório
+#   {arquivos}  arquivo(s) onde foram encontrados
+#   {codigos}   códigos de ocorrência (ex: ZA, ZAZ7 e ZAAE)
+#   {nomes}     lista de nomes
+
+# Quando TODOS caem no mesmo grupo
+todos:
+  devolucao: "{saudacao}. Fiz a análise dos nomes dos favorecidos do relatório e encontrei todos no arquivo {arquivos} com código de devolução ({codigos})."
+  pago: "{saudacao}. Fiz a análise dos nomes dos favorecidos do relatório e encontrei todos pagos no arquivo {arquivos} (código 00)."
+  nao_enviado: "{saudacao}. Fiz a análise dos nomes dos favorecidos do relatório e nenhum está nos arquivos do banco. Não foram enviados, precisam ser reenviados."
+  rejeitado: "{saudacao}. Fiz a análise dos nomes dos favorecidos do relatório e todos foram rejeitados pelo banco no arquivo {arquivos} ({codigos})."
+  aceito_nao_pago: "{saudacao}. Fiz a análise dos nomes dos favorecidos do relatório. Todos foram aceitos pelo banco no arquivo {arquivos}, mas ainda não aparecem como pagos."
+  outro_pagamento: "{saudacao}. Fiz a análise dos nomes dos favorecidos do relatório. Eles aparecem nos arquivos do banco, mas com valor, data ou documento diferente."
+
+# Quando há grupos misturados: abertura + uma linha por grupo presente
+abertura: "{saudacao}. Fiz a análise dos {total} favorecidos do relatório."
+grupos:
+  devolucao: "{n} estão no arquivo {arquivos} com código de devolução ({codigos}): {nomes}."
+  pago: "{n} estão pagos (código 00): {nomes}."
+  rejeitado: "{n} foram rejeitados pelo banco ({codigos}): {nomes}."
+  aceito_nao_pago: "{n} foram aceitos pelo banco, mas ainda não aparecem como pagos: {nomes}."
+  outro_pagamento: "{n} aparecem nos arquivos, mas com valor, data ou documento diferente: {nomes}."
+  nao_enviado: "{n} não estão em nenhum arquivo, não foram enviados ao banco: {nomes}."

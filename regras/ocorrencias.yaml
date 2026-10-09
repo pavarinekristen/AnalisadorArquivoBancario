@@ -1,0 +1,169 @@
+# Códigos de ocorrência (FEBRABAN + códigos próprios do Santander).
+# categoria:
+#   pago      = crédito/débito efetivado (só vale no MOV)
+#   sucesso   = inclusão/alteração/exclusão aceita (CRI)
+#   devolucao = qualquer código começando com Z no MOV é devolução (regra fixa no motor)
+#   erro      = banco rejeitou
+# Para incluir um código novo, basta acrescentar uma linha aqui.
+
+"00": {categoria: pago, descricao: "Crédito ou Débito Efetivado"}
+"03": {categoria: pago, descricao: "Débito Autorizado pela Agência - Efetuado"}
+"BD": {categoria: sucesso, descricao: "Inclusão Efetuada com Sucesso"}
+"BE": {categoria: sucesso, descricao: "Alteração Efetuada com Sucesso"}
+"BF": {categoria: sucesso, descricao: "Exclusão Efetuada com Sucesso"}
+
+"ZA": {categoria: devolucao, descricao: "Agência/Conta do Favorecido Substituída"}
+"ZB": {categoria: devolucao, descricao: "Divergência entre primeiro e último nome do beneficiário e o nome na Receita Federal"}
+"ZC": {categoria: devolucao, descricao: "Confirmação de Antecipação de Valor"}
+"ZD": {categoria: devolucao, descricao: "Antecipação parcial de valor"}
+"ZE": {categoria: devolucao, descricao: "Título bloqueado na base"}
+"ZF": {categoria: devolucao, descricao: "Sistema em contingência - título valor maior que referência"}
+"ZG": {categoria: devolucao, descricao: "Sistema em contingência - título vencido"}
+"ZH": {categoria: devolucao, descricao: "Sistema em contingência - título indexado"}
+"ZI": {categoria: devolucao, descricao: "Beneficiário divergente"}
+"ZJ": {categoria: devolucao, descricao: "Limite de pagamentos parciais excedido"}
+"ZK": {categoria: devolucao, descricao: "Boleto já liquidado"}
+"Z7": {categoria: devolucao, descricao: "Código do banco: agência ou conta destinatária do crédito inválida"}
+"Z8": {categoria: devolucao, descricao: "Código próprio do banco (devolução)"}
+"Z9": {categoria: devolucao, descricao: "Código próprio do banco (devolução)"}
+
+"01": {categoria: erro, descricao: "Insuficiência de Fundos - Débito Não Efetuado"}
+"02": {categoria: erro, descricao: "Crédito ou Débito Cancelado pelo Pagador/Credor"}
+"AA": {categoria: erro, descricao: "Controle Inválido"}
+"AB": {categoria: erro, descricao: "Tipo de Operação Inválido"}
+"AC": {categoria: erro, descricao: "Tipo de Serviço Inválido"}
+"AD": {categoria: erro, descricao: "Forma de Lançamento Inválida"}
+"AE": {categoria: erro, descricao: "Tipo/Número de Inscrição Inválido"}
+"AF": {categoria: erro, descricao: "Código de Convênio Inválido"}
+"AG": {categoria: erro, descricao: "Agência/Conta Corrente/DV Inválido"}
+"AH": {categoria: erro, descricao: "Nº Sequencial do Registro no Lote Inválido"}
+"AI": {categoria: erro, descricao: "Código de Segmento de Detalhe Inválido"}
+"AJ": {categoria: erro, descricao: "Tipo de Movimento Inválido"}
+"AK": {categoria: erro, descricao: "Código da Câmara de Compensação do Banco Favorecido Inválido"}
+"AL": {categoria: erro, descricao: "Código do Banco Favorecido Inválido"}
+"AM": {categoria: erro, descricao: "Agência Mantenedora da Conta Corrente do Favorecido Inválida"}
+"AN": {categoria: erro, descricao: "Conta Corrente/DV do Favorecido Inválido"}
+"AO": {categoria: erro, descricao: "Nome do Favorecido Não Informado"}
+"AP": {categoria: erro, descricao: "Data Lançamento Inválida"}
+"AQ": {categoria: erro, descricao: "Tipo/Quantidade da Moeda Inválido"}
+"AR": {categoria: erro, descricao: "Valor do Lançamento Inválido"}
+"AS": {categoria: erro, descricao: "Aviso ao Favorecido - Identificação Inválida"}
+"AT": {categoria: erro, descricao: "Tipo/Número de Inscrição do Favorecido Inválido"}
+"AU": {categoria: erro, descricao: "Logradouro do Favorecido Não Informado"}
+"AV": {categoria: erro, descricao: "Nº do Local do Favorecido Não Informado"}
+"AW": {categoria: erro, descricao: "Cidade do Favorecido Não Informada"}
+"AX": {categoria: erro, descricao: "CEP/Complemento do Favorecido Inválido"}
+"AY": {categoria: erro, descricao: "Sigla do Estado do Favorecido Inválida"}
+"AZ": {categoria: erro, descricao: "Código/Nome do Banco Depositário Inválido"}
+"BA": {categoria: erro, descricao: "Código/Nome da Agência Depositária Não Informado"}
+"BB": {categoria: erro, descricao: "Seu Número Inválido"}
+"BC": {categoria: erro, descricao: "Nosso Número Inválido"}
+"BG": {categoria: erro, descricao: "Agência/Conta Impedida Legalmente"}
+"CA": {categoria: erro, descricao: "Código de Barras - Código do Banco Inválido"}
+"CB": {categoria: erro, descricao: "Código de Barras - Código da Moeda Inválido"}
+"CC": {categoria: erro, descricao: "Código de Barras - Dígito Verificador Geral Inválido"}
+"CD": {categoria: erro, descricao: "Código de Barras - Valor do Título Inválido"}
+"CE": {categoria: erro, descricao: "Código de Barras - Campo Livre Inválido"}
+"CF": {categoria: erro, descricao: "Valor do Documento Inválido"}
+"CG": {categoria: erro, descricao: "Valor do Abatimento Inválido"}
+"CH": {categoria: erro, descricao: "Valor do Desconto Inválido"}
+"CI": {categoria: erro, descricao: "Valor de Mora Inválido"}
+"CJ": {categoria: erro, descricao: "Valor da Multa Inválido"}
+"CK": {categoria: erro, descricao: "Valor do IR Inválido"}
+"CL": {categoria: erro, descricao: "Valor do ISS Inválido"}
+"CM": {categoria: erro, descricao: "Valor do IOF Inválido"}
+"CN": {categoria: erro, descricao: "Valor de Outras Deduções Inválido"}
+"CO": {categoria: erro, descricao: "Valor de Outros Acréscimos Inválido"}
+"CP": {categoria: erro, descricao: "Valor do INSS Inválido"}
+"HA": {categoria: erro, descricao: "Lote Não Aceito"}
+"HB": {categoria: erro, descricao: "Inscrição da Empresa Inválida para o Contrato"}
+"HC": {categoria: erro, descricao: "Convênio Inexistente/Inválido para o Contrato"}
+"HD": {categoria: erro, descricao: "Agência/Conta da Empresa Inexistente/Inválida para o Contrato"}
+"HE": {categoria: erro, descricao: "Tipo de Serviço Inválido para o Contrato"}
+"HF": {categoria: erro, descricao: "Conta Corrente da Empresa com Saldo Insuficiente"}
+"HG": {categoria: erro, descricao: "Lote de Serviço Fora de Sequência"}
+"HH": {categoria: erro, descricao: "Lote de Serviço Inválido"}
+"HI": {categoria: erro, descricao: "Arquivo não aceito"}
+"HJ": {categoria: erro, descricao: "Tipo de Registro Inválido"}
+"HK": {categoria: erro, descricao: "Código Remessa/Retorno Inválido"}
+"HL": {categoria: erro, descricao: "Versão de layout inválida"}
+"H1": {categoria: erro, descricao: "Arquivo sem trailer"}
+"TA": {categoria: erro, descricao: "Lote Não Aceito - Totais do Lote com Diferença"}
+"YA": {categoria: erro, descricao: "Título Não Encontrado"}
+"YB": {categoria: erro, descricao: "Identificador Registro Opcional Inválido"}
+"YC": {categoria: erro, descricao: "Código Padrão Inválido"}
+"YD": {categoria: erro, descricao: "Código de Ocorrência Inválido"}
+"YE": {categoria: erro, descricao: "Complemento de Ocorrência Inválido"}
+"YF": {categoria: erro, descricao: "Alegação já Informada"}
+
+# --- Consignado (raro em pagamento a fornecedor) ---
+"BH": {categoria: erro, descricao: "Empresa não pagou salário"}
+"BI": {categoria: erro, descricao: "Falecimento do mutuário"}
+"BJ": {categoria: erro, descricao: "Empresa não enviou remessa do mutuário"}
+"BK": {categoria: erro, descricao: "Empresa não enviou remessa no vencimento"}
+"BL": {categoria: erro, descricao: "Valor da parcela inválida"}
+"BM": {categoria: erro, descricao: "Identificação do contrato inválida"}
+"BN": {categoria: sucesso, descricao: "Operação de Consignação Incluída com Sucesso"}
+"BO": {categoria: sucesso, descricao: "Operação de Consignação Alterada com Sucesso"}
+"BP": {categoria: sucesso, descricao: "Operação de Consignação Excluída com Sucesso"}
+"BQ": {categoria: sucesso, descricao: "Operação de Consignação Liquidada com Sucesso"}
+"BR": {categoria: sucesso, descricao: "Reativação Efetuada com Sucesso"}
+"BS": {categoria: sucesso, descricao: "Suspensão Efetuada com Sucesso"}
+"HM": {categoria: erro, descricao: "Mutuário não identificado"}
+"HN": {categoria: erro, descricao: "Tipo do benefício não permite empréstimo"}
+"HO": {categoria: erro, descricao: "Benefício cessado/suspenso"}
+"HP": {categoria: erro, descricao: "Benefício possui representante legal"}
+"HQ": {categoria: erro, descricao: "Benefício é do tipo PA (Pensão alimentícia)"}
+"HR": {categoria: erro, descricao: "Quantidade de contratos permitida excedida"}
+"HS": {categoria: erro, descricao: "Benefício não pertence ao Banco informado"}
+"HT": {categoria: erro, descricao: "Início do desconto informado já ultrapassado"}
+"HU": {categoria: erro, descricao: "Número da parcela inválida"}
+"HV": {categoria: erro, descricao: "Quantidade de parcela inválida"}
+"HW": {categoria: erro, descricao: "Margem consignável excedida para o mutuário dentro do prazo do contrato"}
+"HX": {categoria: erro, descricao: "Empréstimo já cadastrado"}
+"HY": {categoria: erro, descricao: "Empréstimo inexistente"}
+"HZ": {categoria: erro, descricao: "Empréstimo já encerrado"}
+"H2": {categoria: erro, descricao: "Mutuário sem crédito na competência"}
+"H3": {categoria: erro, descricao: "Não descontado - outros motivos"}
+"H4": {categoria: erro, descricao: "Retorno de Crédito não pago"}
+"H5": {categoria: erro, descricao: "Cancelamento de empréstimo retroativo"}
+"H6": {categoria: erro, descricao: "Outros Motivos de Glosa"}
+"H7": {categoria: erro, descricao: "Margem consignável excedida para o mutuário acima do prazo do contrato"}
+"H8": {categoria: erro, descricao: "Mutuário desligado do empregador"}
+"H9": {categoria: erro, descricao: "Mutuário afastado por licença"}
+"IA": {categoria: erro, descricao: "Primeiro nome do mutuário diferente do censo ou da base de Titular do Benefício"}
+"IB": {categoria: erro, descricao: "Benefício suspenso/cessado pela APS ou Sisobi"}
+"IC": {categoria: erro, descricao: "Benefício suspenso por dependência de cálculo"}
+"ID": {categoria: erro, descricao: "Benefício suspenso/cessado pela inspetoria/auditoria"}
+"IE": {categoria: erro, descricao: "Benefício bloqueado para empréstimo pelo beneficiário"}
+"IF": {categoria: erro, descricao: "Benefício bloqueado para empréstimo por TBM"}
+"IG": {categoria: erro, descricao: "Benefício está em fase de concessão de PA ou desdobramento"}
+"IH": {categoria: erro, descricao: "Benefício cessado por óbito"}
+"II": {categoria: erro, descricao: "Benefício cessado por fraude"}
+"IJ": {categoria: erro, descricao: "Benefício cessado por concessão de outro benefício"}
+"IK": {categoria: erro, descricao: "Benefício cessado: estatutário transferido para órgão de origem"}
+"IL": {categoria: erro, descricao: "Empréstimo suspenso pela APS"}
+"IM": {categoria: erro, descricao: "Empréstimo cancelado pelo banco"}
+"IN": {categoria: erro, descricao: "Crédito transformado em PAB"}
+"IO": {categoria: erro, descricao: "Término da consignação foi alterado"}
+"IP": {categoria: erro, descricao: "Fim do empréstimo ocorreu durante período de suspensão ou concessão"}
+"IQ": {categoria: erro, descricao: "Empréstimo suspenso pelo banco"}
+
+# --- Pix ---
+"PA": {categoria: erro, descricao: "Pix não efetivado"}
+"PB": {categoria: erro, descricao: "Transação interrompida devido a erro no PSP do Recebedor"}
+"PC": {categoria: erro, descricao: "Número da conta transacional encerrada no PSP do Recebedor"}
+"PD": {categoria: erro, descricao: "Tipo incorreto para a conta transacional especificada"}
+"PE": {categoria: erro, descricao: "Tipo de transação não é suportado/autorizado na conta transacional especificada"}
+"PF": {categoria: erro, descricao: "CPF/CNPJ do recebedor não é consistente com o titular da conta"}
+"PG": {categoria: erro, descricao: "CPF/CNPJ do usuário recebedor incorreto"}
+"PH": {categoria: erro, descricao: "Ordem rejeitada pelo PSP do Recebedor"}
+"PI": {categoria: erro, descricao: "ISPB do PSP do Pagador inválido ou inexistente"}
+"PJ": {categoria: erro, descricao: "Chave não cadastrada no DICT"}
+"PK": {categoria: erro, descricao: "QR Code inválido/vencido"}
+"PL": {categoria: erro, descricao: "Forma de iniciação inválida"}
+"PM": {categoria: erro, descricao: "Chave de pagamento inválida"}
+"PN": {categoria: erro, descricao: "Chave de pagamento não informada"}
+
+# --- Devolução SPB ---
+"XD": {categoria: devolucao, descricao: "Devolução do SPB"}
