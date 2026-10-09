@@ -17,6 +17,14 @@ Roda no seu computador, sem internet e de graça. Os arquivos não saem da sua m
 (ou a pasta inteira), aperte **Ctrl+C**, volte na página e clique em **📋 Colar arquivos copiados**.
 O Excel vira o relatório e o resto vira os arquivos do banco. Depois é só clicar em **CONFERIR**.
 
+**Quem conferir:** escolha uma das três formas:
+- **Digitar nomes** (padrão): um favorecido por linha. Pode ser nome inteiro ou parte, CPF/CNPJ ou nº do
+  documento. Para filtrar, acrescente valor (`6.503,00`) e/ou data (`07/10/2026`) na mesma linha.
+  O programa acha o nome mesmo abreviado ou cortado pelo banco (ex: `FULANO DE TAL DA SILVA` acha `F T DA SILVA`)
+  e mostra **todos** os pagamentos daquele favorecido nos arquivos, cada um com seu código.
+- **Excel** do relatório (abas BANCO, RESUMO ou SISTEMA).
+- **Colar lista do sistema** (texto "Situação: Com Erro").
+
 Ou, informando separado:
 
 2. **Relatório:** arraste o Excel (ex: `RELATÓRIO COMPLETO 05-10.xlsx`) e escolha a lista

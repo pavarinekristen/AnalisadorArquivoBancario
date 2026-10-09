@@ -94,7 +94,7 @@ def test_mensagem_misto():
     res = motor.conferir([_pag(), _pag(favorecido="FULANO", cpf_cnpj="1", documento="100001111111111")], regs)
     msg = mensagem.montar(res, agora=datetime(2026, 10, 8, 15))
     assert msg.startswith("Boa tarde. Fiz a análise dos 2 favorecidos do relatório.")
-    assert "1 não estão em nenhum arquivo, não foram enviados ao banco: FULANO." in msg
+    assert "1 não está em nenhum arquivo, não foi enviado ao banco: FULANO." in msg
 
 
 @precisa_dados_reais
@@ -156,3 +156,43 @@ def test_dois_pagamentos_do_mesmo_favorecido_no_relatorio():
     regs = _dois_pagamentos_mesmo_valor()
     res = motor.conferir([_pag(), _pag(documento="100001111111111", data="01102026")], regs)
     assert [r.status for r in res] == [DEVOLUCAO, PAGO]
+
+
+# ---- pesquisa por nomes digitados ----
+
+def test_nome_bate_abreviado_truncado_e_comercial():
+    casos = [("BELTRANO PEREIRA DE SOUZA", "B PEREIRA DE SOUZA LTDA", True),
+             ("FULANO DE TAL DA SILVA", "F T DA SILVA", True),
+             ("CICLANO DE ALBUQUERQUE PEREIRA FONSECA", "CICLANO DE ALBUQUERQUE PEREIRA", True),
+             ("alfa & beta", "ALFA   BETA  CONSULTORIA EMPRE", True),
+             ("SILVA", "JOSE DA SILVA", True),
+             ("MARIA SILVA", "JOSE DA SILVA", False),
+             ("ANA PAULA", "A P COMERCIO", False)]
+    for digitado, banco, esperado in casos:
+        assert motor.nome_bate(digitado, banco) == esperado, (digitado, banco)
+
+
+def test_ler_nomes_digitados():
+    pags = relatorio.ler_nomes_digitados(
+        "FULANO DE TAL\nCICLANO 11.222.333/0001-81\nBELTRANO 6.503,00 07/10/2026\n100009000000001\n\n")
+    assert [(p.favorecido, p.cpf_cnpj, p.documento, p.valor, p.data) for p in pags] == [
+        ("FULANO DE TAL", "", "", None, ""),
+        ("CICLANO", "11222333000181", "", None, ""),
+        ("BELTRANO", "", "", 6503.0, "07102026"),
+        ("100009000000001", "", "100009000000001", None, "")]
+
+
+def test_pesquisar_um_resultado_por_pagamento():
+    regs = _dois_pagamentos_mesmo_valor()
+    res = motor.pesquisar(relatorio.ler_nomes_digitados("FULANO DE TAL DA SILVA\nBELTRANO"), regs)
+    assert [(r.pagamento.favorecido, r.status) for r in res] == [
+        ("FULANO DE TAL DA SILVA", DEVOLUCAO),      # mais recente primeiro
+        ("FULANO DE TAL DA SILVA", PAGO),
+        ("BELTRANO", NAO_ENVIADO)]
+
+
+def test_pesquisar_com_valor_filtra():
+    regs = _dois_pagamentos_mesmo_valor() + _regs(
+        "FORN_E_04_071026P_MOV.TXT", seg_a("F T DA SILVA", "100009000000077", "07102026", 99900, "00"), seg_b(CPF))
+    res = motor.pesquisar(relatorio.ler_nomes_digitados("FULANO DA SILVA 999,00"), regs)
+    assert [(r.status, r.pagamento.valor) for r in res] == [(PAGO, 999.0)]
