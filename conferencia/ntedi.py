@@ -1,17 +1,19 @@
-"""Leitura das pastas de rede fixas do NTEDI (INBOXENV = retorno, SENTBOX = remessa)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+from typing import Literal
 
 from . import cnab240
 from .modelos import ArquivoBanco, RegistroBanco
 
+Tipo = Literal["retorno", "remessa"]
+
 BASE_RETORNO = Path(r"\\Ntedi020\grpaftdata$\INBOXENV")
 BASE_REMESSA = Path(r"\\Ntedi020\grpaftdata$\SENTBOX")
 
-ROTULOS = {"retorno": "Retorno", "remessa": "Remessa"}
+ROTULOS: dict[Tipo, str] = {"retorno": "Retorno", "remessa": "Remessa"}
 
 
 @dataclass
@@ -22,16 +24,15 @@ class ResultadoNtedi:
     total_ignorados_data: int = 0
 
 
-def caminho(tipo: str, subpasta: str) -> Path:
-    """Monta o caminho completo (base fixa do `tipo` + subpasta digitada pela pessoa)."""
+def caminho(tipo: Tipo, subpasta: str) -> Path:
     base = BASE_RETORNO if tipo == "retorno" else BASE_REMESSA
     nome = subpasta.strip().strip("\\/")
     return base / nome
 
 
 def _listar_com_filtro(pasta: Path, de: date | None, ate: date | None) -> tuple[list[Path], int]:
-    """Arquivos de `pasta` cujo mtime cai em [de, ate]. Devolve (achados, nº descartados por data)."""
-    achados, descartados = [], 0
+    achados: list[Path] = []
+    descartados = 0
     for p in sorted(pasta.iterdir()):
         if not p.is_file():
             continue
@@ -44,8 +45,7 @@ def _listar_com_filtro(pasta: Path, de: date | None, ate: date | None) -> tuple[
     return achados, descartados
 
 
-def ler_subpasta(tipo: str, subpasta: str, de: date | None = None, ate: date | None = None) -> ResultadoNtedi:
-    """Lê a subpasta dentro da pasta padrão do `tipo` escolhido ('retorno' ou 'remessa')."""
+def ler_subpasta(tipo: Tipo, subpasta: str, de: date | None = None, ate: date | None = None) -> ResultadoNtedi:
     rotulo = ROTULOS[tipo]
     pasta = caminho(tipo, subpasta)
     r = ResultadoNtedi()

@@ -1,4 +1,3 @@
-"""Histórico das conferências em SQLite (arquivo dados/historico.db)."""
 from __future__ import annotations
 
 import sqlite3
@@ -7,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .modelos import DEVOLUCAO, Resultado
+from .modelos import DEVOLUCAO, Pagamento, Resultado
 
 BANCO = Path(__file__).resolve().parent.parent / "dados" / "historico.db"
 
@@ -28,6 +27,10 @@ def _conectar(caminho: Path = BANCO) -> sqlite3.Connection:
             favorecido TEXT, cpf_cnpj TEXT, documento TEXT, valor REAL, data_pagto TEXT,
             status TEXT, codigos TEXT, arquivo TEXT
         );
+        CREATE INDEX IF NOT EXISTS idx_itens_status ON itens(status);
+        CREATE INDEX IF NOT EXISTS idx_itens_cpf_cnpj ON itens(cpf_cnpj);
+        CREATE INDEX IF NOT EXISTS idx_itens_favorecido ON itens(favorecido);
+        CREATE INDEX IF NOT EXISTS idx_conferencias_data_hora ON conferencias(data_hora);
     """)
     return con
 
@@ -58,7 +61,6 @@ def buscar(texto: str = "", caminho: Path = BANCO) -> pd.DataFrame:
 
 
 def reincidentes(caminho: Path = BANCO) -> pd.DataFrame:
-    """Favorecidos devolvidos em mais de um pagamento (documentos/datas diferentes)."""
     with _conectar(caminho) as con:
         return pd.read_sql_query("""
             SELECT COALESCE(NULLIF(cpf_cnpj, ''), favorecido) AS chave,
@@ -71,18 +73,21 @@ def reincidentes(caminho: Path = BANCO) -> pd.DataFrame:
 
 
 def devolucoes_anteriores(resultados: list[Resultado], caminho: Path = BANCO) -> dict[str, int]:
-    """Para cada favorecido desta conferência, quantas devoluções diferentes já constam no histórico."""
-    if not caminho.exists():
+    if not caminho.exists() or not resultados:
         return {}
-    out = {}
+    pagamentos: list[Pagamento] = [r.pagamento for r in resultados]
     with _conectar(caminho) as con:
-        for r in resultados:
-            p = r.pagamento
-            n = con.execute("""
-                SELECT COUNT(DISTINCT COALESCE(NULLIF(documento, ''), data_pagto || valor)) FROM itens
-                WHERE status = ? AND ((? <> '' AND cpf_cnpj = ?) OR favorecido = ?)
-                  AND COALESCE(NULLIF(documento, ''), data_pagto || valor) <> COALESCE(NULLIF(?, ''), ? || ?)""",
-                (DEVOLUCAO, p.cpf_cnpj, p.cpf_cnpj, p.favorecido, p.documento, p.data, p.valor)).fetchone()[0]
-            if n:
-                out[p.favorecido] = n
-    return out
+        con.execute("CREATE TEMP TABLE _consulta (idx INTEGER PRIMARY KEY, cpf_cnpj TEXT, "
+                    "favorecido TEXT, documento TEXT, data_pagto TEXT, valor REAL)")
+        con.executemany(
+            "INSERT INTO _consulta VALUES (?,?,?,?,?,?)",
+            [(i, p.cpf_cnpj, p.favorecido, p.documento, p.data, p.valor) for i, p in enumerate(pagamentos)])
+        linhas = con.execute("""
+            SELECT q.idx, COUNT(DISTINCT COALESCE(NULLIF(i.documento, ''), i.data_pagto || i.valor))
+            FROM _consulta q JOIN itens i
+              ON i.status = ?
+             AND ((q.cpf_cnpj <> '' AND i.cpf_cnpj = q.cpf_cnpj) OR i.favorecido = q.favorecido)
+             AND COALESCE(NULLIF(i.documento, ''), i.data_pagto || i.valor)
+                 <> COALESCE(NULLIF(q.documento, ''), q.data_pagto || q.valor)
+            GROUP BY q.idx""", (DEVOLUCAO,)).fetchall()
+    return {pagamentos[idx].favorecido: n for idx, n in linhas if n}

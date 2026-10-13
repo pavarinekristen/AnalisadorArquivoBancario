@@ -1,4 +1,3 @@
-"""Lê os arquivos copiados no Explorer do Windows (Ctrl+C). O programa roda na mesma máquina."""
 from __future__ import annotations
 
 import subprocess
@@ -6,7 +5,6 @@ from pathlib import Path
 
 
 def arquivos_copiados() -> list[Path]:
-    """Caminhos copiados na área de transferência. Pastas são expandidas (só o primeiro nível)."""
     try:
         saida = subprocess.run(
             ["powershell", "-NoProfile", "-STA", "-Command",

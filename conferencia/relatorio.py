@@ -1,4 +1,3 @@
-"""Leitura da lista a conferir: Excel do sistema (abas BANCO / RESUMO / SISTEMA) ou lista colada."""
 from __future__ import annotations
 
 import io
@@ -11,17 +10,19 @@ import openpyxl
 
 from .modelos import Pagamento
 
+Celula = str | int | float | date | datetime | None
 
-def sem_acento(s) -> str:
+
+def sem_acento(s: Celula) -> str:
     s = "" if s is None else str(s)
     return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)).upper().strip()
 
 
-def _digitos(s) -> str:
+def _digitos(s: Celula) -> str:
     return re.sub(r"\D", "", "" if s is None else str(s)).lstrip("0")
 
 
-def _valor_br(v) -> float | None:
+def _valor_br(v: Celula) -> float | None:
     if v is None or v == "":
         return None
     if isinstance(v, (int, float)):
@@ -35,22 +36,18 @@ def _valor_br(v) -> float | None:
         return None
 
 
-def _data(v) -> str:
-    """Normaliza para DDMMAAAA."""
+def _data(v: Celula) -> str:
     if isinstance(v, (datetime, date)):
         return v.strftime("%d%m%Y")
     m = re.search(r"(\d{2})/(\d{2})/(\d{4})", "" if v is None else str(v))
     return f"{m.group(1)}{m.group(2)}{m.group(3)}" if m else ""
 
 
-# ---------------------------------------------------------------- Excel
-
 def ler_excel(conteudo: bytes) -> dict[str, list[Pagamento]]:
-    """Devolve {nome da lista: pagamentos} para cada aba reconhecida."""
     wb = openpyxl.load_workbook(io.BytesIO(conteudo), read_only=True, data_only=True)
     listas: dict[str, list[Pagamento]] = {}
     for ws in wb.worksheets:
-        linhas = [list(r) for r in ws.iter_rows(values_only=True)]
+        linhas: list[list[Celula]] = [list(r) for r in ws.iter_rows(values_only=True)]
         texto = " ".join(sem_acento(c) for r in linhas[:40] for c in r if c is not None)
         if "TOTAL P/ REFER" in " ".join(sem_acento(c) for r in linhas for c in r if c is not None):
             listas[f"{ws.title} (relatório do banco)"] = _aba_banco(linhas)
@@ -61,7 +58,7 @@ def ler_excel(conteudo: bytes) -> dict[str, list[Pagamento]]:
     return {k: v for k, v in listas.items() if v}
 
 
-def _cabecalho(linhas, *obrigatorios) -> tuple[int, dict[str, int]]:
+def _cabecalho(linhas: list[list[Celula]], *obrigatorios: str) -> tuple[int, dict[str, int]]:
     for i, r in enumerate(linhas):
         nomes = [sem_acento(c) for c in r]
         if all(any(o in n for n in nomes) for o in obrigatorios):
@@ -69,14 +66,14 @@ def _cabecalho(linhas, *obrigatorios) -> tuple[int, dict[str, int]]:
     return -1, {}
 
 
-def _col(cab: dict[str, int], *partes) -> int | None:
+def _col(cab: dict[str, int], *partes: str) -> int | None:
     for nome, j in cab.items():
         if all(p in nome for p in partes):
             return j
     return None
 
 
-def _aba_banco(linhas) -> list[Pagamento]:
+def _aba_banco(linhas: list[list[Celula]]) -> list[Pagamento]:
     pags: list[Pagamento] = []
     situacao, cab = "", None
     for r in linhas:
@@ -87,14 +84,12 @@ def _aba_banco(linhas) -> list[Pagamento]:
         if primeiro.startswith("SITUACAO:"):
             situacao = str(cel[0]).split(":", 1)[1].strip()
             continue
-        # linha do favorecido: <ref> | NOME/CNPJ | método | data
         if len(cel) >= 2 and re.fullmatch(r"\d+", str(cel[0]).strip()) and "/" in str(cel[1]):
             nome, _, doc = str(cel[1]).rpartition("/")
             cab = dict(referencia=str(cel[0]).strip(), favorecido=nome.strip(), cpf_cnpj=_digitos(doc),
                        metodo=next((str(c) for c in cel[2:] if not _data(c)), ""),
                        data=next((_data(c) for c in cel[2:] if _data(c)), ""))
             continue
-        # linha do documento: <doc>-<op>-<grupo> | valor | ocorrências
         for j, c in enumerate(cel):
             m = re.fullmatch(r"(\d{15})-(\d*)-?(.*)", str(c).strip())
             if m and cab:
@@ -107,7 +102,7 @@ def _aba_banco(linhas) -> list[Pagamento]:
     return pags
 
 
-def _aba_resumo(linhas) -> list[Pagamento]:
+def _aba_resumo(linhas: list[list[Celula]]) -> list[Pagamento]:
     i, cab = _cabecalho(linhas, "NOME RCA", "CPF/CNPJ")
     c_nome, c_doc, c_op = _col(cab, "NOME"), _col(cab, "CPF"), _col(cab, "OP")
     c_val = _col(cab, "VALOR", "BANCO") or _col(cab, "VALOR")
@@ -128,7 +123,7 @@ def _aba_resumo(linhas) -> list[Pagamento]:
     return pags
 
 
-def _aba_sistema(linhas) -> list[Pagamento]:
+def _aba_sistema(linhas: list[list[Celula]]) -> list[Pagamento]:
     i, cab = _cabecalho(linhas, "NUMERO OP", "SITUACAO")
     c_op, c_nome, c_val = _col(cab, "NUMERO OP"), _col(cab, "NOME"), _col(cab, "VALOR")
     c_sit, c_desc, c_err = _col(cab, "SITUACAO"), _col(cab, "DESCRICAO"), _col(cab, "ERRO")
@@ -157,17 +152,14 @@ def _aba_sistema(linhas) -> list[Pagamento]:
     return pags
 
 
-# ---------------------------------------------------------------- lista colada
-
 _FAV = re.compile(r"^(.+)/(\d{11,14})$")
 _DOC = re.compile(r"^(10000\d{10})-?(\S*)")
 
 
 def ler_texto_colado(texto: str) -> list[Pagamento]:
-    """Formato do relatório 'Situação: Com Erro' copiado do sistema de pagamentos."""
     linhas = [l.strip() for l in texto.splitlines() if l.strip()]
     pags: list[Pagamento] = []
-    atual: dict | None = None
+    atual: dict[str, str] | None = None
     situacao = ""
     for i, l in enumerate(linhas):
         if sem_acento(l).startswith("SITUACAO:"):
@@ -199,21 +191,12 @@ def ler_texto_colado(texto: str) -> list[Pagamento]:
     return pags
 
 
-# ---------------------------------------------------------------- nomes digitados
-
 _VALOR_TXT = re.compile(r"(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}|(?:R\$\s*)?\d+,\d{2}")
 _DATA_TXT = re.compile(r"\d{2}/\d{2}/\d{4}")
 
 
 def ler_nomes_digitados(texto: str) -> list[Pagamento]:
-    """Uma pesquisa por linha. Pode ter nome, CPF/CNPJ, nº documento, valor e data, em qualquer ordem.
-
-    Ex:  FULANO DE TAL DA SILVA
-         CICLANO 11222333000181
-         BELTRANO SOUZA 1.234,56
-         100009000000001
-    """
-    pags = []
+    pags: list[Pagamento] = []
     for linha in texto.splitlines():
         resto = linha.strip()
         if not resto:
@@ -227,7 +210,6 @@ def ler_nomes_digitados(texto: str) -> list[Pagamento]:
         if m:
             data = _data(m.group(0))
             resto = resto.replace(m.group(0), " ")
-        # CPF/CNPJ podem vir com pontuação: 11.222.333/0001-81, 123.456.789-09
         for m in re.finditer(r"\d[\d./-]{9,}\d", resto):
             dig = re.sub(r"\D", "", m.group(0))
             if len(dig) == 15 and dig.startswith("10000"):
