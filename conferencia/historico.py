@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from .modelos import DEVOLUCAO, Pagamento, Resultado
+from .modelos import DEVOLUCAO, Banco, Pagamento, Resultado
+from .reprocessar import ResultadoMover
 
 BANCO = Path(__file__).resolve().parent.parent / "dados" / "historico.db"
 
@@ -31,16 +32,23 @@ def _conectar(caminho: Path = BANCO) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_itens_cpf_cnpj ON itens(cpf_cnpj);
         CREATE INDEX IF NOT EXISTS idx_itens_favorecido ON itens(favorecido);
         CREATE INDEX IF NOT EXISTS idx_conferencias_data_hora ON conferencias(data_hora);
+        CREATE TABLE IF NOT EXISTS movimentacoes (
+            data_hora TEXT NOT NULL, banco TEXT, origem TEXT, destino TEXT, arquivo TEXT, resultado TEXT
+        );
     """)
+    # Bases antigas foram criadas antes do Tribanco: tudo que já está lá é Santander.
+    if "banco" not in {c[1] for c in con.execute("PRAGMA table_info(conferencias)")}:
+        con.execute("ALTER TABLE conferencias ADD COLUMN banco TEXT NOT NULL DEFAULT 'santander'")
     return con
 
 
 def salvar(resultados: list[Resultado], relatorio: str, arquivos: list[str],
-           caminho: Path = BANCO) -> int:
+           banco: Banco = "santander", caminho: Path = BANCO) -> int:
     with _conectar(caminho) as con:
         cur = con.execute(
-            "INSERT INTO conferencias (data_hora, relatorio, arquivos, total) VALUES (?,?,?,?)",
-            (datetime.now().isoformat(timespec="seconds"), relatorio, ", ".join(arquivos), len(resultados)))
+            "INSERT INTO conferencias (data_hora, relatorio, arquivos, total, banco) VALUES (?,?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"), relatorio, ", ".join(arquivos), len(resultados),
+             banco))
         cid = cur.lastrowid
         con.executemany(
             "INSERT INTO itens VALUES (?,?,?,?,?,?,?,?,?)",
@@ -49,11 +57,26 @@ def salvar(resultados: list[Resultado], relatorio: str, arquivos: list[str],
     return cid
 
 
+def registrar_movimentacao(banco: Banco, origem: Path, destino: Path, resultado: ResultadoMover,
+                           caminho: Path = BANCO) -> None:
+    agora = datetime.now().isoformat(timespec="seconds")
+    linhas = ([(n, "movido") for n in resultado.movidos]
+              + [(n, f"não movido: {motivo}") for n, motivo in resultado.pulados])
+    with _conectar(caminho) as con:
+        con.executemany("INSERT INTO movimentacoes VALUES (?,?,?,?,?,?)",
+                        [(agora, banco, str(origem), str(destino), n, res) for n, res in linhas])
+
+
+def movimentacoes(caminho: Path = BANCO) -> pd.DataFrame:
+    with _conectar(caminho) as con:
+        return pd.read_sql_query("SELECT * FROM movimentacoes ORDER BY data_hora DESC", con)
+
+
 def buscar(texto: str = "", caminho: Path = BANCO) -> pd.DataFrame:
     with _conectar(caminho) as con:
         like = f"%{texto.strip()}%"
         return pd.read_sql_query("""
-            SELECT c.data_hora AS conferido_em, i.favorecido, i.cpf_cnpj, i.documento, i.valor,
+            SELECT c.data_hora AS conferido_em, c.banco, i.favorecido, i.cpf_cnpj, i.documento, i.valor,
                    i.data_pagto, i.status, i.codigos, i.arquivo
             FROM itens i JOIN conferencias c ON c.id = i.conferencia_id
             WHERE i.favorecido LIKE ? OR i.cpf_cnpj LIKE ? OR i.documento LIKE ?

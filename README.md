@@ -1,8 +1,18 @@
 # Conferência de Pagamentos
 
-Confere o relatório de pagamentos (Excel ou lista colada) contra os arquivos do banco Santander
-(CNAB 240: `MOV`, `CRI`, `Retorno`) e diz, para cada favorecido, se foi **pago**, **devolvido**,
-**rejeitado**, **aceito e ainda não pago** ou **não enviado**. Gera a mensagem pronta para o chefe.
+Confere o relatório de pagamentos (Excel ou lista colada) contra os arquivos do banco e diz, para cada
+favorecido, se foi **pago**, **devolvido**, **rejeitado**, **aceito e ainda não pago** ou **não enviado**.
+Gera a mensagem pronta para o chefe.
+
+Bancos atendidos (escolha no topo da tela **Conferir**):
+- **Santander** (033): CNAB 240 `MOV`, `CRI`, `Retorno` (ex: `FORN_EZN1_06_071026P_MOV.TXT`).
+  Rede: `\\Ntedi020\grpaftdata$\INBOXENV` (retorno) e `SENTBOX` (remessa). UCM: `tranap$/santander$/inbox$/processed$`.
+- **Tribanco** (634): CNAB 240, retorno `.dat` (ex: `A35708191410260001.dat`), com a crítica (`BD`/erros) e o
+  pagamento (`00`)/devolução (`Z...`) no mesmo tipo de arquivo. Rede: `\\ntedi020\AFTData\tranap\tribanco`.
+  UCM: `tranap$/tribanco$/retorno$` (com subpastas `processed$`/`error$`). O arquivo é reconhecido pelo header (banco 634), e a data/hora de
+  geração do header define a ordem entre retornos.
+
+Arquivos de outro banco são ignorados com aviso (ex: colar MOV do Santander com o Tribanco selecionado).
 
 Roda no seu computador, sem internet e de graça. Os arquivos não saem da sua máquina.
 
@@ -47,8 +57,18 @@ Ou, informando separado:
 | Favorecido aparece, mas com outro valor/documento | Outro pagamento |
 | Não aparece em nenhum arquivo | Não enviado |
 
+No **Tribanco** o retorno faz os dois papéis: registro com `00`/`03` ou `Z...`/`XD` conta como MOV,
+o resto (`BD`, códigos de erro) conta como CRI. Ex: `BD` num retorno e `00` num retorno seguinte = Pago.
+
 A busca é pelo nº do documento; se não tiver, pelo CPF/CNPJ + valor; por último, pelo nome + valor
 (nesse caso aparece o aviso "confira").
+
+## Reprocessar
+Página **Reprocessar**: lista os arquivos do `INBOXENV\<subpasta>` (filtro por data e nome), você marca
+quais e o programa move para `\\Ntedi020\grpaftdata$\INBOX\<subpasta>`, onde são processados de novo.
+Primeiro **Simular** (mostra o que vai acontecer), depois confirmar e **Mover agora**. Nunca sobrescreve:
+se o arquivo já existe no INBOX ele fica onde está, com aviso. Tudo que foi movido fica registrado no
+Histórico. Tribanco: falta configurar o destino (`BASE_TRIBANCO_INBOX` em `conferencia/reprocessar.py`).
 
 ## Personalizar
 - **`regras/ocorrencias.yaml`**: tabela de códigos (FEBRABAN completa + códigos do Santander Z7/Z8/Z9).

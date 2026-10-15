@@ -5,8 +5,11 @@ from datetime import date
 from enum import StrEnum
 from typing import Literal
 
-TipoArquivo = Literal["MOV", "CRI", "REL", "RETORNO", "OUTRO"]
+TipoArquivo = Literal["MOV", "CRI", "REL", "RETORNO", "RET", "OUTRO"]
 Segmento = Literal["A", "J"]
+Banco = Literal["santander", "tribanco"]
+
+BANCOS: dict[Banco, str] = {"santander": "Santander", "tribanco": "Tribanco"}
 
 
 class Status(StrEnum):
@@ -42,10 +45,14 @@ class ArquivoBanco:
     data: date | None
     lote: int | None
     empresa: str | None
+    banco: Banco = "santander"
+    hora: str = ""
+    pagador: str = ""          # empresa que paga (header do arquivo, posições 73-102)
+    pagador_cnpj: str = ""     # inscrição da empresa (header, 19-32)
 
     @property
-    def ordem(self) -> tuple[date, int, str]:
-        return (self.data or date.min, self.lote or 0, self.nome)
+    def ordem(self) -> tuple[date, int, str, str]:
+        return (self.data or date.min, self.lote or 0, self.hora, self.nome)
 
 
 @dataclass(slots=True)

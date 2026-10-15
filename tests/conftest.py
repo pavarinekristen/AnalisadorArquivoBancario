@@ -65,3 +65,17 @@ def seg_j52(cnpj, seq=2):
 
 
 HEADER = "0330000" + "0" * 233
+
+
+def header_tribanco(data="14102026", hora="101500"):
+    """Header de arquivo do Tribanco (banco 634, retorno), data DDMMAAAA em 144-151 e hora em 152-157."""
+    l = list(" " * 240)
+    _campo(l, 1, 8, "63400000")
+    _campo(l, 143, 143, "2")
+    _campo(l, 144, 151, data)
+    _campo(l, 152, 157, hora)
+    return "".join(l)
+
+
+def do_tribanco(linha: str) -> str:
+    return "634" + linha[3:]

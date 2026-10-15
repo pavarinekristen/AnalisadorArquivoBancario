@@ -30,7 +30,7 @@ def _juntar(itens: list[str]) -> str:
 
 
 def _arquivo_curto(nome: str) -> str:
-    return nome.rsplit(".", 1)[0] if nome.upper().endswith(".TXT") else nome
+    return nome.rsplit(".", 1)[0] if nome.upper().endswith((".TXT", ".DAT")) else nome
 
 
 def _valor_br(v: float | None) -> str:

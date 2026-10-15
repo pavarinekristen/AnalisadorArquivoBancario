@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from functools import lru_cache
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -56,6 +57,16 @@ def _tem_erro(r: RegistroBanco) -> bool:
     return any(OCORRENCIAS.get(c, {}).get("categoria", "erro") == "erro" for c in r.ocorrencias)
 
 
+# Santander separa crítica (CRI) e movimento (MOV) em arquivos diferentes. O Tribanco manda tudo no
+# mesmo retorno (RET): o que já é pagamento/devolução conta como MOV, o resto (BD, erros) como CRI.
+def _e_efetivacao(r: RegistroBanco) -> bool:
+    return r.arquivo.tipo == "MOV" or (r.arquivo.tipo == "RET" and (_e_pago(r) or _e_devolucao(r)))
+
+
+def _e_critica(r: RegistroBanco) -> bool:
+    return r.arquivo.tipo == "CRI" or (r.arquivo.tipo == "RET" and not _e_efetivacao(r))
+
+
 def _valor_igual(a: float | None, b: float | None) -> bool:
     return a is not None and b is not None and abs(a - b) < 0.005
 
@@ -78,12 +89,17 @@ class Indice:
         cpf = p.cpf_cnpj.lstrip("0")
         nome = nome_normalizado(p.favorecido)
 
-        por_nome = [r for chave, rs in self.por_nome.items() if _nomes_compativeis(chave, nome) for r in rs]
-        do_favorecido = (list(self.por_cpf.get(cpf, [])) if cpf else []) or por_nome
+        # A varredura por nome é a parte cara: só roda quando o CPF não resolve.
+        def por_nome() -> list[RegistroBanco]:
+            return [r for chave, rs in self.por_nome.items() if _nomes_compativeis(chave, nome) for r in rs]
+
+        do_cpf = list(self.por_cpf.get(cpf, [])) if cpf else []
+        do_favorecido = do_cpf or por_nome()
 
         def resposta(achados: list[RegistroBanco], fraco: bool,
                     avisos: Sequence[str] = ()) -> tuple[list[RegistroBanco], bool, list[RegistroBanco], list[str]]:
-            return achados, fraco, [r for r in do_favorecido if r not in achados], list(avisos)
+            ja = {id(r) for r in achados}
+            return achados, fraco, [r for r in do_favorecido if id(r) not in ja], list(avisos)
 
         if doc:
             return resposta(self.por_doc.get(doc, []), False)
@@ -94,7 +110,7 @@ class Indice:
                 achados, avisos = _um_pagamento(candidatos, p)
                 return resposta(achados, False, avisos)
 
-        candidatos = [r for r in por_nome if _valor_igual(r.valor, p.valor)]
+        candidatos = [r for r in (do_favorecido if not do_cpf else por_nome()) if _valor_igual(r.valor, p.valor)]
         if candidatos:
             achados, avisos = _um_pagamento(candidatos, p)
             return resposta(achados, True, avisos)
@@ -176,8 +192,8 @@ def classificar(p: Pagamento, achados: list[RegistroBanco], fraco: bool,
                 outros: list[RegistroBanco], avisos: Sequence[str] = ()) -> Resultado:
     res = Resultado(pagamento=p, status=NAO_ENVIADO, registros=sorted(achados, key=lambda r: r.arquivo.ordem),
                     match_fraco=fraco, observacoes=list(avisos))
-    movs = [r for r in res.registros if r.arquivo.tipo == "MOV"]
-    cris = [r for r in res.registros if r.arquivo.tipo == "CRI"]
+    movs = [r for r in res.registros if _e_efetivacao(r)]
+    cris = [r for r in res.registros if _e_critica(r)]
 
     if movs:
         _classificar_mov(res, movs)
@@ -207,11 +223,20 @@ def _palavras(nome: str, manter_iniciais: bool = False) -> list[str]:
             if w not in _PALAVRAS_IGNORADAS or (manter_iniciais and len(w) == 1)]
 
 
+@lru_cache(maxsize=200_000)
+def _palavras_do_banco(nome_banco: str) -> tuple[tuple[str, ...], bool]:
+    # Os mesmos nomes se repetem em milhares de registros: normaliza cada um uma vez só.
+    return tuple(_palavras(nome_banco, manter_iniciais=True)), len(nome_banco.strip()) >= 28
+
+
 def nome_bate(digitado: str, nome_banco: str) -> bool:
-    procuradas, banco = _palavras(digitado), _palavras(nome_banco, manter_iniciais=True)
+    return _bate(tuple(_palavras(digitado)), nome_banco)
+
+
+def _bate(procuradas: tuple[str, ...], nome_banco: str) -> bool:
+    banco, truncado = _palavras_do_banco(nome_banco)
     if not procuradas or not banco:
         return False
-    truncado = len(nome_banco.strip()) >= 28
     inteiras, ultimo, faltando = 0, -1, 0
     for w in procuradas:
         achou = None
@@ -237,15 +262,22 @@ def nome_bate(digitado: str, nome_banco: str) -> bool:
     return inteiras >= (2 if faltando else 1)
 
 
+def _pelo_nome(digitado: str, registros: list[RegistroBanco]) -> list[RegistroBanco]:
+    # Compara cada nome distinto uma vez e depois filtra os registros (mantendo a ordem).
+    procuradas = tuple(_palavras(digitado))
+    batem = {n for n in {r.nome for r in registros} if _bate(procuradas, n)}
+    return [r for r in registros if r.nome in batem]
+
+
 def _achados_por_pesquisa(p: Pagamento, idx: Indice, registros: list[RegistroBanco]) -> list[RegistroBanco]:
     if p.documento:
         achados = idx.por_doc.get(p.documento.lstrip("0"), [])
     elif p.cpf_cnpj:
         achados = idx.por_cpf.get(p.cpf_cnpj.lstrip("0"), [])
         if not achados and p.favorecido != p.cpf_cnpj:
-            achados = [r for r in registros if nome_bate(p.favorecido, r.nome)]
+            achados = _pelo_nome(p.favorecido, registros)
     else:
-        achados = [r for r in registros if nome_bate(p.favorecido, r.nome)]
+        achados = _pelo_nome(p.favorecido, registros)
     if p.valor is not None:
         achados = [r for r in achados if _valor_igual(r.valor, p.valor)]
     if p.data:
@@ -253,22 +285,55 @@ def _achados_por_pesquisa(p: Pagamento, idx: Indice, registros: list[RegistroBan
     return achados
 
 
+def _achados_por_pagador(p: Pagamento, registros: list[RegistroBanco]) -> list[RegistroBanco]:
+    # O nome digitado pode ser da empresa que paga (header do arquivo), não de quem recebe:
+    # aí vale todo pagamento dos arquivos dessa empresa.
+    if p.documento:
+        return []
+    cpf = p.cpf_cnpj.lstrip("0")
+    procuradas = tuple(_palavras(p.favorecido))
+    bate: dict[int, bool] = {}
+    for r in registros:
+        a = r.arquivo
+        if id(a) not in bate:
+            bate[id(a)] = (a.pagador_cnpj == cpf) if cpf else bool(a.pagador) and _bate(procuradas, a.pagador)
+    achados = [r for r in registros if bate[id(r.arquivo)]]
+    if p.valor is not None:
+        achados = [r for r in achados if _valor_igual(r.valor, p.valor)]
+    if p.data:
+        achados = [r for r in achados if r.data == p.data]
+    return achados
+
+
+def _por_pagamento(achados: list[RegistroBanco]) -> list[list[RegistroBanco]]:
+    grupos: defaultdict[str, list[RegistroBanco]] = defaultdict(list)
+    for r in achados:
+        grupos[_chave_pagamento(r)].append(r)
+    return sorted(grupos.values(), key=lambda rs: max(r.arquivo.ordem for r in rs), reverse=True)
+
+
 def pesquisar(pesquisas: list[Pagamento], registros: list[RegistroBanco]) -> list[Resultado]:
     idx = Indice(registros)
     resultados: list[Resultado] = []
     for p in pesquisas:
         achados = _achados_por_pesquisa(p, idx, registros)
-        if not achados:
+        ja = {id(r) for r in achados}
+        do_pagador = [r for r in _achados_por_pagador(p, registros) if id(r) not in ja]
+        if not achados and not do_pagador:
             resultados.append(classificar(p, [], False, []))
             continue
-        grupos: defaultdict[str, list[RegistroBanco]] = defaultdict(list)
-        for r in achados:
-            grupos[_chave_pagamento(r)].append(r)
-        for regs in sorted(grupos.values(), key=lambda rs: max(r.arquivo.ordem for r in rs), reverse=True):
+        grupos = _por_pagamento(achados)
+        for regs in grupos:
             um = Pagamento(favorecido=p.favorecido, cpf_cnpj=regs[0].cpf_cnpj or p.cpf_cnpj,
                            documento=regs[0].documento, valor=regs[0].valor, data=regs[0].data)
             res = classificar(um, regs, False, [])
             if len(grupos) > 1:
                 res.observacoes.insert(0, f"Favorecido tem {len(grupos)} pagamentos nos arquivos.")
+            resultados.append(res)
+        for regs in _por_pagamento(do_pagador):
+            um = Pagamento(favorecido=regs[0].nome, cpf_cnpj=regs[0].cpf_cnpj, documento=regs[0].documento,
+                           valor=regs[0].valor, data=regs[0].data)
+            res = classificar(um, regs, False, [])
+            res.observacoes.insert(0, f"Pago por {regs[0].arquivo.pagador} (achado pela empresa pagadora).")
             resultados.append(res)
     return resultados
