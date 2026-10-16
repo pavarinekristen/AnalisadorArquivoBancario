@@ -1,86 +1,103 @@
+"""Resumo da conferência: texto técnico e direto, para bater o olho e saber a situação de cada favorecido.
+
+Problemas primeiro (devolução, rejeição, verificar, não enviado), pago por último. Cada linha traz o favorecido,
+o valor, o código com o significado e o arquivo onde foi encontrado.
+"""
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 
-import yaml
+from . import cnab240, motor
+from .modelos import (ACEITO_NAO_PAGO, BANCOS, DEVOLUCAO, NAO_ENVIADO, OUTRO_PAGAMENTO, PAGO, REJEITADO, ROTULOS,
+                      VERIFICAR, Banco, Resultado, Status)
 
-from .modelos import (ACEITO_NAO_PAGO, DEVOLUCAO, NAO_ENVIADO, OUTRO_PAGAMENTO, PAGO, REJEITADO,
-                      Resultado)
-
-_MODELOS = Path(__file__).resolve().parent.parent / "regras" / "mensagens.yaml"
-_ORDEM = [DEVOLUCAO, REJEITADO, ACEITO_NAO_PAGO, OUTRO_PAGAMENTO, PAGO, NAO_ENVIADO]
-
-
-def _carregar_modelos(caminho: Path) -> dict:
-    with open(caminho, encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def saudacao(agora: datetime | None = None) -> str:
-    h = (agora or datetime.now()).hour
-    return "Bom dia" if h < 12 else "Boa tarde" if h < 18 else "Boa noite"
-
-
-def _juntar(itens: list[str]) -> str:
-    itens = list(dict.fromkeys(i for i in itens if i))
-    if len(itens) <= 1:
-        return "".join(itens)
-    return ", ".join(itens[:-1]) + " e " + itens[-1]
-
-
-def _arquivo_curto(nome: str) -> str:
-    return nome.rsplit(".", 1)[0] if nome.upper().endswith((".TXT", ".DAT")) else nome
+ORDEM: list[Status] = [DEVOLUCAO, REJEITADO, VERIFICAR, NAO_ENVIADO, ACEITO_NAO_PAGO, OUTRO_PAGAMENTO, PAGO]
+_PROBLEMAS = frozenset(ORDEM) - {PAGO}
 
 
 def _valor_br(v: float | None) -> str:
-    return "-" if v is None else f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return "valor não informado" if v is None else (
+        "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
 
-def _campos(rs: list[Resultado], total: int, agora: datetime | None) -> dict[str, str | int]:
-    return dict(
-        saudacao=saudacao(agora), n=len(rs), total=total,
-        arquivos=_juntar(sorted({_arquivo_curto(r.arquivo_status) for r in rs})),
-        codigos=_juntar(sorted({c for r in rs for c in r.codigos})),
-        nomes=_juntar([r.pagamento.favorecido for r in rs]),
-        esta="está" if len(rs) == 1 else "estão", foi="foi" if len(rs) == 1 else "foram",
-        s="" if len(rs) == 1 else "s", m="" if len(rs) == 1 else "m",
-    )
+def arquivo_curto(nome: str) -> str:
+    return nome.rsplit(".", 1)[0] if nome.upper().endswith((".TXT", ".DAT")) else nome
 
 
-def montar(resultados: list[Resultado], agora: datetime | None = None,
-           caminho_modelos: Path = _MODELOS) -> str:
+def _codigo(r: Resultado) -> str:
+    codigos = [c for c in r.codigos if c]
+    if not codigos:
+        return ""
+    significado = motor.descrever_varios([c for cod in codigos for c in cnab240.ocorrencias(cod)])
+    return f"{' '.join(codigos)}: {significado}"
+
+
+def _linha(r: Resultado) -> str:
+    partes = [r.pagamento.favorecido, _valor_br(r.pagamento.valor)]
+    if r.status == NAO_ENVIADO:
+        partes.append("não está em nenhum arquivo do banco")
+    elif r.status == OUTRO_PAGAMENTO:
+        partes.append("aparece nos arquivos com outro valor, data ou documento")
+    else:
+        if codigo := _codigo(r):
+            partes.append(codigo)
+        if r.arquivo_status:
+            partes.append(arquivo_curto(r.arquivo_status))
+    linha = "- " + " | ".join(partes)
+    if r.match_fraco:
+        linha += " (confirmar: achado sem documento/CPF)"
+    return linha
+
+
+def _juntar(itens: list[str]) -> str:
+    return itens[0] if len(itens) == 1 else ", ".join(itens[:-1]) + " e " + itens[-1]
+
+
+def _arquivos(resultados: list[Resultado]) -> list[str]:
+    """Seção só dos arquivos: em qual arquivo cada favorecido foi encontrado."""
+    por_arquivo: dict[str, list[str]] = {}
+    for r in resultados:
+        if r.arquivo_status:
+            por_arquivo.setdefault(arquivo_curto(r.arquivo_status), []).append(r.pagamento.favorecido)
+    if not por_arquivo:
+        return ["ARQUIVOS", "Nenhum favorecido foi encontrado nos arquivos do banco."]
+    nomes = sorted(por_arquivo)
+    frase = (f"Favorecidos encontrados no arquivo {nomes[0]}." if len(nomes) == 1
+             else f"Favorecidos encontrados nos arquivos {_juntar(nomes)}.")
+    linhas = ["ARQUIVOS", frase]
+    if len(nomes) > 1:
+        linhas += [f"- {a}: {', '.join(dict.fromkeys(por_arquivo[a]))}" for a in nomes]
+    return linhas
+
+
+def _totais(grupos: dict[Status, list[Resultado]]) -> str:
+    return ", ".join(f"{len(grupos[s])} {ROTULOS[s].lower()}" for s in ORDEM if s in grupos)
+
+
+def resumo(resultados: list[Resultado], banco: Banco | None = None, agora: datetime | None = None,
+           anteriores: dict[int, int] | None = None) -> str:
     if not resultados:
         return ""
-    modelos = _carregar_modelos(caminho_modelos)
-    grupos: dict[str, list[Resultado]] = {}
+    agora = agora or datetime.now()
+    grupos: dict[Status, list[Resultado]] = {}
     for r in resultados:
         grupos.setdefault(r.status, []).append(r)
 
-    if len(grupos) == 1:
-        status, rs = next(iter(grupos.items()))
-        return modelos["todos"][status].format(**_campos(rs, len(resultados), agora))
+    titulo = "Resumo da conferência" + (f" {BANCOS[banco]}" if banco else "") + f" ({agora:%d/%m/%Y %H:%M})"
+    linhas = [titulo, f"{len(resultados)} favorecido(s): {_totais(grupos)}."]
+    if not _PROBLEMAS & grupos.keys():
+        linhas.append("Tudo certo: todos pagos.")
+    linhas += ["", *_arquivos(resultados)]
 
-    linhas = [modelos["abertura"].format(**_campos(resultados, len(resultados), agora))]
-    for status in _ORDEM:
+    for status in ORDEM:
         if status in grupos:
-            linhas.append(modelos["grupos"][status].format(**_campos(grupos[status], len(resultados), agora)))
-    return "\n\n".join(linhas)
+            linhas += ["", f"{ROTULOS[status].upper()} ({len(grupos[status])})", *map(_linha, grupos[status])]
 
-
-def montar_pesquisa(resultados: list[Resultado], agora: datetime | None = None,
-                    caminho_modelos: Path = _MODELOS) -> str:
-    if not resultados:
-        return ""
-    nomes = list(dict.fromkeys(r.pagamento.favorecido for r in resultados))
-    um_por_nome = len(nomes) == len(resultados)
-    if um_por_nome and len({r.status for r in resultados}) == 1:
-        return montar(resultados, agora, caminho_modelos)
-
-    modelos = _carregar_modelos(caminho_modelos)["pesquisa"]
-    linhas = [modelos["abertura"].format(saudacao=saudacao(agora))]
-    for r in resultados:
-        linhas.append(modelos[r.status].format(
-            nome=r.pagamento.favorecido, codigos=" ".join(r.codigos),
-            arquivo=_arquivo_curto(r.arquivo_status), valor=_valor_br(r.pagamento.valor)))
+    atencao = []
+    if alertas := [r.pagamento.favorecido for r in resultados if r.alerta_sistema]:
+        atencao.append(f"- Sistema diz pago, mas o banco não pagou: {', '.join(dict.fromkeys(alertas))}.")
+    for i, n in (anteriores or {}).items():
+        atencao.append(f"- {resultados[i].pagamento.favorecido} já teve {n} devolução(ões) em conferências anteriores.")
+    if atencao:
+        linhas += ["", "ATENÇÃO", *atencao]
     return "\n".join(linhas)

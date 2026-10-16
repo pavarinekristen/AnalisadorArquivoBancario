@@ -176,3 +176,80 @@ def test_localizar_so_digitos_nao_busca_titulo():
     c = _ClienteFalso([])
     assert c.localizar(PASTA, "80505382") is None
     assert all("dDocTitle" not in q for q in c.consultas)
+
+
+def test_listar_paginado_nao_repesca_erro_de_credencial():
+    chamadas: list[str] = []
+
+    def recusa(folder_path: str) -> list[dict[str, str]]:
+        chamadas.append(folder_path)
+        raise ucm.ErroUCM("HTTP 401", recuperavel=False)
+
+    with pytest.raises(ucm.ErroUCM) as erro:
+        ucm.listar_paginado(PASTA, recusa)
+    assert not isinstance(erro.value, ucm.ErroUCMParcial) and len(chamadas) == 1
+
+
+class _Resposta:
+    def __init__(self, corpo: bytes) -> None:
+        self.corpo = corpo
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self) -> bytes:
+        return self.corpo
+
+
+def _http_erro(codigo: int):
+    import urllib.error
+    return urllib.error.HTTPError("https://x/servico", codigo, "erro", {}, None)
+
+
+def test_requisitar_repete_5xx_e_nao_repete_4xx(monkeypatch):
+    import urllib.request
+    monkeypatch.setattr(ucm.time, "sleep", lambda _s: None)
+    respostas = [_http_erro(503), _Resposta(b"ok")]
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: (
+        (_ for _ in ()).throw(r) if isinstance(r := respostas.pop(0), Exception) else r))
+    c = ucm.ClienteUCM("id", "segredo")
+    assert c._requisitar(urllib.request.Request("https://x/servico")) == b"ok"
+
+    tentativas: list[int] = []
+
+    def sempre_401(req, timeout):
+        tentativas.append(1)
+        raise _http_erro(401)
+
+    monkeypatch.setattr(urllib.request, "urlopen", sempre_401)
+    with pytest.raises(ucm.ErroUCM) as erro:
+        c._requisitar(urllib.request.Request("https://x/servico"))
+    assert len(tentativas) == 1 and not erro.value.recuperavel
+
+
+def test_token_renovado_quando_expira(monkeypatch):
+    import json
+    import urllib.request
+    pedidos: list[str] = []
+
+    def urlopen(req, timeout):
+        pedidos.append(req.full_url)
+        return _Resposta(json.dumps({"access_token": f"t{len(pedidos)}", "expires_in": 3600}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(ucm, "URL_TOKEN", "https://idcs.exemplo/oauth2/v1/token")
+    monkeypatch.setattr(ucm, "ESCOPO", "escopo")
+    c = ucm.ClienteUCM("id", "segredo")
+    assert c._bearer() == "t1" and c._bearer() == "t1" and len(pedidos) == 1
+    c._expira = 0
+    assert c._bearer() == "t2" and len(pedidos) == 2
+
+
+def test_sem_configuracao_nao_tenta_conectar(monkeypatch):
+    monkeypatch.setattr(ucm, "URL_TOKEN", "")
+    with pytest.raises(ucm.ErroUCM) as erro:
+        ucm.ClienteUCM("id", "segredo")._bearer()
+    assert not erro.value.recuperavel

@@ -34,3 +34,22 @@ def test_excel_0510_abas():
     assert tam == {"relatório do banco)": 18, "resumo)": 18, "sistema - não pagos)": 12}
     banco = next(v for k, v in listas.items() if "banco" in k)
     assert all(len(p.documento) == 15 and p.documento.startswith("10000") for p in banco)
+
+
+def test_valor_com_milhar_sem_centavos():
+    assert relatorio._valor_br("1.500") == 1500.0
+    assert relatorio._valor_br("1.234.567") == 1234567.0
+    assert relatorio._valor_br("1.5") == 1.5
+    assert relatorio._valor_br("R$ 1.234,56") == 1234.56
+
+
+def test_nomes_digitados_com_valor_inteiro_e_cpf_sem_zero():
+    pags = relatorio.ler_nomes_digitados("BELTRANO 1500\nFULANO R$ 2.300\nCICLANO 1234567890\nLOJA 12")
+    assert [(p.favorecido, p.valor, p.cpf_cnpj) for p in pags] == [
+        ("BELTRANO", 1500.0, ""), ("FULANO", 2300.0, ""), ("CICLANO", None, "1234567890"), ("LOJA 12", None, "")]
+
+
+def test_resumo_com_valor_banco_na_primeira_coluna():
+    linhas = [["VALOR BANCO", "NOME RCA", "CPF/CNPJ", "VALOR SISTEMA"],
+              [10.0, "FULANO", "11222333000181", 99.0]]
+    assert [(p.favorecido, p.valor) for p in relatorio._aba_resumo(linhas)] == [("FULANO", 10.0)]

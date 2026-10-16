@@ -5,4 +5,4 @@ if not exist .venv\Scripts\streamlit.exe (
   pause
   exit /b 1
 )
-.venv\Scripts\streamlit run app.py --server.headless false --browser.gatherUsageStats false
+.venv\Scripts\streamlit run app.py --server.address 127.0.0.1 --server.headless false --browser.gatherUsageStats false

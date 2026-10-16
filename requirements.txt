@@ -1,5 +1,6 @@
-streamlit>=1.40
-pandas
-openpyxl
-pyyaml
-pytest
+# Versões fixas: a instalação no cliente fica igual à testada.
+streamlit==1.65.0
+pandas==3.0.6
+openpyxl==3.1.5
+PyYAML==6.0.3
+keyring==25.7.0

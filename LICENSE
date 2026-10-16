@@ -1,0 +1,15 @@
+Conferência de Pagamentos
+Copyright (c) 2026 TechOne. Todos os direitos reservados.
+
+LICENÇA DE USO DE SOFTWARE PROPRIETÁRIO
+
+1. Este software e sua documentação são de propriedade exclusiva da TechOne e são licenciados, não vendidos.
+2. O licenciado pode instalar e usar o software apenas nas máquinas e para a empresa indicadas no contrato de
+   licença, para uso interno.
+3. É proibido copiar, distribuir, sublicenciar, alugar, modificar, descompilar ou fazer engenharia reversa do
+   software, no todo ou em parte, sem autorização por escrito da TechOne.
+4. O software é fornecido "no estado em que se encontra". A TechOne não se responsabiliza por decisões tomadas
+   com base nos resultados sem a conferência humana indicada na tela (avisos "Confira" e status "Verificar").
+5. Componentes de terceiros incluídos seguem as próprias licenças, listadas em THIRD_PARTY_NOTICES.md.
+6. Os dados processados (arquivos do banco, relatórios, histórico) permanecem do licenciado e ficam na máquina
+   dele; o software não envia esses dados para a TechOne.

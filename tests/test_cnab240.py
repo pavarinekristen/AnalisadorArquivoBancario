@@ -44,3 +44,33 @@ def test_final24_le_tudo():
     arqs, regs = cnab240.ler_pasta(FINAL24)
     assert sum(r.segmento == "A" for r in regs) == 4787
     assert cnab240.lotes_faltando(arqs) == {}
+
+
+def test_arquivo_sem_quebra_de_linha_e_lido_inteiro():
+    txt = "".join([HEADER, seg_a("F T DA SILVA", "100009000000001", "07102026", 5400, "00"),
+                   seg_b("11222333000181")])
+    arq, regs = cnab240.ler_bytes("FORN_X_06_071026P_MOV.TXT", txt.encode("latin-1"))
+    assert [(r.documento, r.valor, r.cpf_cnpj) for r in regs] == [("100009000000001", 54.0, "11222333000181")]
+    assert arq.avisos == []
+
+
+def test_arquivo_utf8_com_acento_nao_desloca_valor():
+    txt = "\n".join([HEADER, seg_a("JOSÉ DA SILVA", "100009000000001", "07102026", 5400, "00")])
+    _, regs = cnab240.ler_bytes("FORN_X_06_071026P_MOV.TXT", txt.encode("utf-8"))
+    assert (regs[0].nome, regs[0].valor) == ("JOSÉ DA SILVA", 54.0)
+
+
+def test_avisa_linha_fora_do_tamanho_e_arquivo_sem_pagamento():
+    arq, regs = cnab240.ler_bytes("FORN_X_06_071026P_MOV.TXT", (HEADER + "\n" + "0" * 100).encode("latin-1"))
+    assert regs == []
+    assert any("fora do tamanho" in a for a in arq.avisos)
+    assert any("sem nenhum pagamento" in a for a in arq.avisos)
+
+
+def test_tribanco_com_data_invalida_usa_data_do_arquivo():
+    from datetime import datetime
+    from .conftest import do_tribanco, header_tribanco
+    txt = "\n".join([header_tribanco(data="99999999"), do_tribanco(seg_a("X", "100009000000001", "07102026", 100, "00"))])
+    mtime = int(datetime(2026, 10, 9, 12).timestamp() * 1e9)
+    arq, _ = cnab240.ler_bytes("A35708191410260001.dat", txt.encode("latin-1"), mtime)
+    assert arq.data == date(2026, 10, 9) and any("data inválida" in a for a in arq.avisos)

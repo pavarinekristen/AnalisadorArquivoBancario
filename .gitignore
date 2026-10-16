@@ -1,5 +1,9 @@
 .venv/
 __pycache__/
-dados/
+/dados/
 *.pyc
 .streamlit/secrets.toml
+config/cliente.yaml
+instalador/pacote/
+instalador/saida/
+wheels/

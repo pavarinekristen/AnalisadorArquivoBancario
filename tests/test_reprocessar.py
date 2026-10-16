@@ -1,5 +1,6 @@
 import os
 import time
+from pathlib import Path
 from datetime import date, timedelta
 
 import pytest
@@ -116,7 +117,7 @@ def test_volume_diferente_copia_e_apaga(pastas, monkeypatch):
     renomear = os.rename
 
     def rename_outro_volume(de, para):
-        if not str(de).endswith(".tmp"):
+        if reprocessar.PASTA_TEMPORARIA not in str(de):
             erro = OSError("volume diferente")
             erro.winerror = 17
             raise erro
@@ -154,3 +155,27 @@ def test_registrar_movimentacao(pastas, tmp_path):
     df = historico.movimentacoes(caminho=db)
     assert list(zip(df["arquivo"], df["resultado"])) == [
         ("A.TXT", "movido"), ("NAO.TXT", "não movido: não está na pasta de origem")]
+
+
+def test_origem_nao_apagada_apos_copia(pastas, monkeypatch):
+    origem, destino = pastas
+    (origem / "A.TXT").write_bytes(b"conteudo")
+    renomear, apagar = os.rename, Path.unlink
+
+    def rename_outro_volume(de, para):
+        if reprocessar.PASTA_TEMPORARIA not in str(de):
+            erro = OSError("volume diferente")
+            erro.winerror = 17
+            raise erro
+        return renomear(de, para)
+
+    def unlink_preso(self, missing_ok=False):
+        if self.name == "A.TXT" and self.parent == origem:
+            raise PermissionError("arquivo em uso")
+        return apagar(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(reprocessar.os, "rename", rename_outro_volume)
+    monkeypatch.setattr(Path, "unlink", unlink_preso)
+    r = reprocessar.mover(origem, destino, ["A.TXT"])
+    assert (r.movidos, r.pulados, r.copiados_sem_apagar) == ([], [], ["A.TXT"])
+    assert (destino / "A.TXT").exists() and (origem / "A.TXT").exists()

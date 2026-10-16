@@ -15,9 +15,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 
-URL_TOKEN = "https://idcs-4f046a8770284ba7a66f3772e0bdf1bf.identity.oraclecloud.com/oauth2/v1/token"
-ESCOPO = "https://090AECD6911E411BAB513DC8CDE8146B.integration.ocp.oraclecloud.com:443urn:opc:resource:consumer::all"
-URL_OIC = "https://oicproderp01-grpksdsqmmhh-gr.integration.ocp.oraclecloud.com/ic/api/integration/v1/flows/rest"
+from . import config
+
+# Endereços do OIC/IDCS de cada cliente vêm de config/cliente.yaml (bloco ucm).
+URL_TOKEN = config.atual().ucm.url_token
+ESCOPO = config.atual().ucm.escopo
+URL_OIC = config.atual().ucm.url_oic
 URL_BUSCA = f"{URL_OIC}/MTS___SEAR_UCM_SOAP_TO_REST/1.0/searchUCM"
 URL_ARQUIVO = f"{URL_OIC}/MTS___GET_UCM_FILE_CONT/1.0/getUCMFile"
 
@@ -36,7 +39,11 @@ Buscador = Callable[[str], list[dict[str, str]]]
 
 
 class ErroUCM(RuntimeError):
-    pass
+    """recuperavel=False: tentar de novo não adianta (credencial errada, consulta inválida)."""
+
+    def __init__(self, mensagem: str, recuperavel: bool = True) -> None:
+        super().__init__(mensagem)
+        self.recuperavel = recuperavel
 
 
 class ErroUCMParcial(ErroUCM):
@@ -144,7 +151,9 @@ def listar_paginado(pasta: str, buscar: Buscador, *filtros: str, paralelo: int =
     def consultar(faixa: tuple[int, int | None]) -> list[DocumentoUCM] | None:
         try:
             return [DocumentoUCM.de_linha(l) for l in buscar(_consulta(alvo, *filtros, *_faixa(*faixa)))]
-        except ErroUCM:
+        except ErroUCM as e:
+            if not e.recuperavel:
+                raise
             return None
 
     with ThreadPoolExecutor(max_workers=paralelo) as pool:
@@ -192,7 +201,10 @@ class ClienteUCM:
                 with urllib.request.urlopen(req, timeout=self._timeout) as r:
                     return r.read()
             except urllib.error.HTTPError as e:
-                if e.code < 500 or tentativa == TENTATIVAS:
+                if e.code < 500:
+                    raise ErroUCM(f"HTTP {e.code} no serviço {servico} (credencial ou consulta recusada).",
+                                  recuperavel=False) from e
+                if tentativa == TENTATIVAS:
                     raise ErroUCM(f"HTTP {e.code} no serviço {servico}.") from e
             except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
                 if tentativa == TENTATIVAS:
@@ -214,6 +226,8 @@ class ClienteUCM:
             return self._token
 
     def _renovar_token(self) -> None:
+        if not (URL_TOKEN and ESCOPO):
+            raise ErroUCM("UCM não configurado (bloco ucm em config/cliente.yaml).", recuperavel=False)
         corpo = urllib.parse.urlencode({"grant_type": "client_credentials", "scope": ESCOPO}).encode()
         req = urllib.request.Request(URL_TOKEN, data=corpo, headers={
             "Authorization": f"Basic {self._credencial}",
@@ -221,7 +235,8 @@ class ClienteUCM:
         })
         dados = self._json(self._requisitar(req))
         if not isinstance(dados, dict) or "access_token" not in dados:
-            raise ErroUCM("O OIC não devolveu o token de acesso. Confira client_id e client_secret.")
+            raise ErroUCM("O OIC não devolveu o token de acesso. Confira client_id e client_secret.",
+                          recuperavel=False)
         self._token = dados["access_token"]
         self._expira = time.monotonic() + int(dados.get("expires_in", 3600)) - 60
 
@@ -271,7 +286,9 @@ class ClienteUCM:
             raise ValueError("Posição começa em 1.")
         filtros: tuple[str, ...] = ()
         while True:
-            docs = [DocumentoUCM.de_linha(l) for l in self.buscar(_consulta(alvo, *filtros))]
+            # Ordena aqui: a posição só bate com a tela do UCM se a página estiver do mais novo pro mais velho.
+            docs = sorted((DocumentoUCM.de_linha(l) for l in self.buscar(_consulta(alvo, *filtros))),
+                          key=lambda d: d.id, reverse=True)
             if posicao <= len(docs):
                 return docs[posicao - 1]
             if len(docs) < LIMITE_PAGINA:

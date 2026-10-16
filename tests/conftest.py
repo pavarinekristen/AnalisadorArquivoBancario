@@ -5,12 +5,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-FINAL24 = Path(r"C:\Users\krist\Downloads\arquivos\FINAL24")
-EXCEL_0510 = Path(r"C:\Users\krist\Downloads\RELATÓRIO COMPLETO 05-10.xlsx")
+# Caso real de 05-10 anonimizado (tests/ferramentas/anonimizar.py): nomes, CPF/CNPJ e documentos trocados,
+# valores, datas, códigos e nomes de arquivo iguais aos originais. Roda em qualquer máquina e no CI.
+DADOS = Path(__file__).resolve().parent / "dados"
+FINAL24 = DADOS / "FINAL24"
+EXCEL_0510 = DADOS / "relatorio_0510.xlsx"
 
 precisa_dados_reais = pytest.mark.skipif(
     not (FINAL24.is_dir() and EXCEL_0510.is_file()),
-    reason="dados reais (FINAL24 / Excel 05-10) não estão nesta máquina")
+    reason="dados de teste anonimizados (tests/dados) não encontrados")
 
 
 def _campo(linha: list, ini: int, fim: int, valor: str):

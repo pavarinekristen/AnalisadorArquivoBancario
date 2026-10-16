@@ -1,0 +1,10 @@
+[project]
+name = "conferencia-pagamentos"
+version = "2.0.0"
+description = "Conferência de pagamentos: relatório x arquivos CNAB 240 do banco (Santander, Tribanco)"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { file = "LICENSE" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

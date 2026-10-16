@@ -5,5 +5,10 @@ backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F2F5FA"
 textColor = "#0B1E3A"
 
+[server]
+# Só esta máquina acessa a tela: ninguém da rede/VPN consegue abrir o app e agir com o seu login.
+address = "127.0.0.1"
+enableXsrfProtection = true
+
 [browser]
 gatherUsageStats = false

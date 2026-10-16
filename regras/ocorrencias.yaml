@@ -1,8 +1,11 @@
 # Códigos de ocorrência (FEBRABAN + códigos próprios do Santander).
 # categoria:
 #   pago      = crédito/débito efetivado (só vale no MOV)
-#   sucesso   = inclusão/alteração/exclusão aceita (CRI)
-#   devolucao = qualquer código começando com Z no MOV é devolução (regra fixa no motor)
+#   sucesso   = inclusão/alteração aceita (CRI)
+#   devolucao = primeiro par começando com Z (ZA, ZAZ7, ZAAE, ZAZ9...) ou XD é devolução (regra fixa no motor,
+#               vale qualquer complemento, cadastrado ou não)
+#   exclusao  = pagamento excluído no banco (vira "Verificar")
+#   Código não cadastrado e sem Z na frente vira "Verificar", nunca "Rejeitado".
 #   erro      = banco rejeitou
 # Para incluir um código novo, basta acrescentar uma linha aqui.
 
@@ -10,7 +13,7 @@
 "03": {categoria: pago, descricao: "Débito Autorizado pela Agência - Efetuado"}
 "BD": {categoria: sucesso, descricao: "Inclusão Efetuada com Sucesso"}
 "BE": {categoria: sucesso, descricao: "Alteração Efetuada com Sucesso"}
-"BF": {categoria: sucesso, descricao: "Exclusão Efetuada com Sucesso"}
+"BF": {categoria: exclusao, descricao: "Exclusão Efetuada com Sucesso"}
 
 "ZA": {categoria: devolucao, descricao: "Agência/Conta do Favorecido Substituída"}
 "ZB": {categoria: devolucao, descricao: "Divergência entre primeiro e último nome do beneficiário e o nome na Receita Federal"}

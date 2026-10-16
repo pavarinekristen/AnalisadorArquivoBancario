@@ -5,11 +5,12 @@ from collections import defaultdict
 from functools import lru_cache
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
-from .modelos import (ACEITO_NAO_PAGO, DEVOLUCAO, NAO_ENVIADO, OUTRO_PAGAMENTO, PAGO, REJEITADO,
-                      Pagamento, RegistroBanco, Resultado)
+from .modelos import (ACEITO_NAO_PAGO, DEVOLUCAO, NAO_ENVIADO, OUTRO_PAGAMENTO, PAGO, REJEITADO, VERIFICAR,
+                      Pagamento, RegistroBanco, Resultado, Status)
 from .relatorio import sem_acento
 
 _REGRAS = Path(__file__).resolve().parent.parent / "regras" / "ocorrencias.yaml"
@@ -23,6 +24,21 @@ def carregar_ocorrencias(caminho: Path = _REGRAS) -> dict[str, dict]:
 
 
 OCORRENCIAS = carregar_ocorrencias()
+_mtime_regras = _REGRAS.stat().st_mtime_ns
+
+
+def recarregar_ocorrencias() -> None:
+    """Relê o YAML se ele mudou: editar a tabela de códigos não exige reiniciar o programa."""
+    global _mtime_regras
+    try:
+        mtime = _REGRAS.stat().st_mtime_ns
+        if mtime != _mtime_regras:
+            novas = carregar_ocorrencias()
+            OCORRENCIAS.clear()
+            OCORRENCIAS.update(novas)
+            _mtime_regras = mtime
+    except (OSError, yaml.YAMLError):
+        pass   # YAML quebrado no meio da edição: segue com a tabela anterior
 
 
 def descrever(codigo: str) -> str:
@@ -40,27 +56,42 @@ def nome_normalizado(s: str) -> str:
     return " ".join(s.split())
 
 
-def _nomes_compativeis(a: str, b: str) -> bool:
-    curto, longo = sorted((a, b), key=len)
-    return len(curto) >= 12 and longo.startswith(curto)
+Categoria = Literal["devolucao", "pago", "erro", "sucesso", "exclusao", "desconhecido"]
+_DECISIVAS: frozenset[str] = frozenset({"pago", "devolucao"})
 
 
-def _e_devolucao(r: RegistroBanco) -> bool:
-    return bool(r.ocorrencias) and (r.ocorrencias[0].startswith("Z") or "XD" in r.ocorrencias)
+def categoria(r: RegistroBanco) -> Categoria:
+    """O primeiro par decide devolução e pagamento: o banco manda o motivo da devolução como Z + complemento
+    (ZAZ7, ZAAE, ZA, ZAZ9...), e qualquer complemento vale, cadastrado ou não. O resto vem da tabela."""
+    oc = r.ocorrencias
+    if not oc:
+        return "desconhecido"
+    if oc[0].startswith("Z") or "XD" in oc:
+        return "devolucao"
+    if oc[0] in ("00", "03"):
+        return "pago"
+    cats = [OCORRENCIAS.get(c, {}).get("categoria") for c in oc]
+    if "erro" in cats:
+        return "erro"
+    if cats[0] == "exclusao":
+        return "exclusao"
+    if all(c == "sucesso" for c in cats):
+        return "sucesso"
+    return "desconhecido"
 
 
-def _e_pago(r: RegistroBanco) -> bool:
-    return bool(r.ocorrencias) and r.ocorrencias[0] in ("00", "03")
+def e_pago(r: RegistroBanco) -> bool:
+    return categoria(r) == "pago"
 
 
-def _tem_erro(r: RegistroBanco) -> bool:
-    return any(OCORRENCIAS.get(c, {}).get("categoria", "erro") == "erro" for c in r.ocorrencias)
+def e_devolucao(r: RegistroBanco) -> bool:
+    return categoria(r) == "devolucao"
 
 
 # Santander separa crítica (CRI) e movimento (MOV) em arquivos diferentes. O Tribanco manda tudo no
 # mesmo retorno (RET): o que já é pagamento/devolução conta como MOV, o resto (BD, erros) como CRI.
 def _e_efetivacao(r: RegistroBanco) -> bool:
-    return r.arquivo.tipo == "MOV" or (r.arquivo.tipo == "RET" and (_e_pago(r) or _e_devolucao(r)))
+    return r.arquivo.tipo == "MOV" or (r.arquivo.tipo == "RET" and categoria(r) in _DECISIVAS)
 
 
 def _e_critica(r: RegistroBanco) -> bool:
@@ -69,6 +100,12 @@ def _e_critica(r: RegistroBanco) -> bool:
 
 def _valor_igual(a: float | None, b: float | None) -> bool:
     return a is not None and b is not None and abs(a - b) < 0.005
+
+
+def _nome_casa(nome_rel: str, procuradas: tuple[str, ...], nome_banco: str) -> bool:
+    # Nome igual sempre casa (mesmo curto). Senão, abreviado/truncado pelo banco, mas sem sobrar palavra
+    # do banco: "JOSE DA SILVA" não casa com "JOSE DA SILVA SANTOS".
+    return nome_normalizado(nome_banco) == nome_rel or _bate(procuradas, nome_banco, completo=True)
 
 
 class Indice:
@@ -82,27 +119,40 @@ class Indice:
                 self.por_doc[r.documento].append(r)
             if r.cpf_cnpj:
                 self.por_cpf[r.cpf_cnpj].append(r)
-            self.por_nome[nome_normalizado(r.nome)].append(r)
+            self.por_nome[r.nome.strip()].append(r)
 
     def buscar(self, p: Pagamento) -> tuple[list[RegistroBanco], bool, list[RegistroBanco], list[str]]:
         doc = p.documento.lstrip("0")
         cpf = p.cpf_cnpj.lstrip("0")
         nome = nome_normalizado(p.favorecido)
+        procuradas = tuple(_palavras(p.favorecido))
 
         # A varredura por nome é a parte cara: só roda quando o CPF não resolve.
         def por_nome() -> list[RegistroBanco]:
-            return [r for chave, rs in self.por_nome.items() if _nomes_compativeis(chave, nome) for r in rs]
+            return [r for chave, rs in self.por_nome.items() if _nome_casa(nome, procuradas, chave) for r in rs]
 
         do_cpf = list(self.por_cpf.get(cpf, [])) if cpf else []
         do_favorecido = do_cpf or por_nome()
 
         def resposta(achados: list[RegistroBanco], fraco: bool,
-                    avisos: Sequence[str] = ()) -> tuple[list[RegistroBanco], bool, list[RegistroBanco], list[str]]:
+                     avisos: Sequence[str] = ()) -> tuple[list[RegistroBanco], bool, list[RegistroBanco], list[str]]:
             ja = {id(r) for r in achados}
             return achados, fraco, [r for r in do_favorecido if id(r) not in ja], list(avisos)
 
         if doc:
-            return resposta(self.por_doc.get(doc, []), False)
+            achados = self.por_doc.get(doc, [])
+            if achados:
+                outros_cpf = sorted({r.cpf_cnpj for r in achados if r.cpf_cnpj and r.cpf_cnpj != cpf})
+                avisos = ([f"Documento confere, mas o CPF/CNPJ no banco é {', '.join(outros_cpf)} "
+                           f"(relatório {cpf}). Confira."] if cpf and outros_cpf else [])
+                return resposta(achados, False, avisos)
+            # Documento digitado errado no relatório não pode esconder uma devolução: tenta CPF + valor + data.
+            candidatos = [r for r in do_cpf if _valor_igual(r.valor, p.valor) and (not p.data or r.data == p.data)]
+            if candidatos:
+                achados, avisos = _um_pagamento(candidatos, p)
+                return resposta(achados, True, ["Documento do relatório não está nos arquivos; achado por "
+                                                "CPF/CNPJ + valor. Confira.", *avisos])
+            return resposta([], False)
 
         if cpf and cpf in self.por_cpf:
             candidatos = [r for r in self.por_cpf[cpf] if p.valor is None or _valor_igual(r.valor, p.valor)]
@@ -113,7 +163,8 @@ class Indice:
         candidatos = [r for r in (do_favorecido if not do_cpf else por_nome()) if _valor_igual(r.valor, p.valor)]
         if candidatos:
             achados, avisos = _um_pagamento(candidatos, p)
-            return resposta(achados, True, avisos)
+            return resposta(achados, True, ["Encontrado só por nome + valor (documento/CPF não bateram). Confira.",
+                                            *avisos])
         return [], False, do_favorecido, []
 
 
@@ -139,32 +190,49 @@ def _um_pagamento(candidatos: list[RegistroBanco], p: Pagamento) -> tuple[list[R
                        f"Usei o mais recente ({_chave_pagamento(escolhido[0]).split('|')[0]}). Confira."]
 
 
-def _classificar_mov(res: Resultado, movs: list[RegistroBanco]) -> None:
-    ultimo = movs[-1]
-    devolvidos = [r for r in movs if _e_devolucao(r)]
-    if _e_devolucao(ultimo) or (devolvidos and not _e_pago(ultimo)):
-        d = devolvidos[-1]
-        res.status, res.codigos, res.arquivo_status = DEVOLUCAO, [d.ocorrencia_bruta], d.arquivo.nome
-        pagos_antes = [r.arquivo.nome for r in movs if _e_pago(r)]
+def _definir(res: Resultado, status: Status, r: RegistroBanco) -> None:
+    res.status, res.codigos, res.arquivo_status = status, [r.ocorrencia_bruta], r.arquivo.nome
+
+
+def _classificar_decisivo(res: Resultado, regs: list[RegistroBanco]) -> None:
+    """Vale o último registro que decide (pago ou devolução); o que vem depois sem decidir só vira aviso."""
+    i = max(i for i, r in enumerate(regs) if categoria(r) in _DECISIVAS)
+    ultimo, anteriores = regs[i], regs[:i]
+    if categoria(ultimo) == "devolucao":
+        _definir(res, DEVOLUCAO, ultimo)
+        pagos_antes = [r.arquivo.nome for r in anteriores if e_pago(r)]
         if pagos_antes:
             res.observacoes.append(f"Apareceu pago (00) antes em {', '.join(pagos_antes)} e depois foi devolvido.")
-    elif _e_pago(ultimo):
-        res.status, res.codigos, res.arquivo_status = PAGO, [ultimo.ocorrencia_bruta], ultimo.arquivo.nome
+    else:
+        _definir(res, PAGO, ultimo)
+        devolvidos = [r for r in anteriores if e_devolucao(r)]
         if devolvidos:
             res.observacoes.append(f"Teve devolução antes em {devolvidos[-1].arquivo.nome} "
                                    f"({devolvidos[-1].ocorrencia_bruta}) e depois foi pago.")
-    else:
-        res.status, res.codigos, res.arquivo_status = REJEITADO, [ultimo.ocorrencia_bruta], ultimo.arquivo.nome
+    for r in regs[i + 1:]:
+        if categoria(r) == "erro" and r.arquivo.tipo != "MOV":
+            res.observacoes.append(f"Houve reenvio rejeitado em {r.arquivo.nome} ({r.ocorrencia_bruta}).")
+        else:
+            res.observacoes.append(f"Depois veio {r.ocorrencia_bruta or 'registro sem código'} em "
+                                   f"{r.arquivo.nome}, sem mudar o status. Confira.")
 
 
-def _classificar_cri(res: Resultado, cris: list[RegistroBanco]) -> None:
-    com_erro = [r for r in cris if _tem_erro(r)]
+def _classificar_indeciso(res: Resultado, regs: list[RegistroBanco]) -> None:
+    com_erro = [r for r in regs if categoria(r) == "erro"]
     if com_erro:
-        e = com_erro[-1]
-        res.status, res.codigos, res.arquivo_status = REJEITADO, [e.ocorrencia_bruta], e.arquivo.nome
+        _definir(res, REJEITADO, com_erro[-1])
+        return
+    ultimo = regs[-1]
+    cat = categoria(ultimo)
+    if cat == "sucesso":
+        _definir(res, ACEITO_NAO_PAGO, ultimo)
+        return
+    _definir(res, VERIFICAR, ultimo)
+    if cat == "exclusao":
+        res.observacoes.append(f"Pagamento excluído no banco ({ultimo.ocorrencia_bruta}) em {ultimo.arquivo.nome}.")
     else:
-        c = cris[-1]
-        res.status, res.codigos, res.arquivo_status = ACEITO_NAO_PAGO, [c.ocorrencia_bruta], c.arquivo.nome
+        res.observacoes.append(f"Situação não conclusiva em {ultimo.arquivo.nome} "
+                               f"(código {ultimo.ocorrencia_bruta or 'vazio'}). Confira com o banco.")
 
 
 def _classificar_outro_pagamento(res: Resultado, outros: list[RegistroBanco]) -> None:
@@ -177,15 +245,13 @@ def _classificar_outro_pagamento(res: Resultado, outros: list[RegistroBanco]) ->
     )
 
 
-def _adicionar_divergencias(res: Resultado, p: Pagamento, achados: list[RegistroBanco], fraco: bool) -> None:
+def _adicionar_divergencias(res: Resultado, p: Pagamento, achados: list[RegistroBanco]) -> None:
     if achados and p.valor is not None and not any(_valor_igual(r.valor, p.valor) for r in achados):
         res.observacoes.append(f"Valor diferente: relatório {p.valor:,.2f} x banco "
                                f"{', '.join(f'{r.valor:,.2f}' for r in achados)}.")
     if achados and p.data and not any(r.data == p.data for r in achados):
         res.observacoes.append(
             f"Data diferente: relatório {p.data} x banco {', '.join(sorted({r.data for r in achados}))}.")
-    if fraco:
-        res.observacoes.append("Encontrado só por nome + valor (documento/CPF não bateram). Confira.")
 
 
 def classificar(p: Pagamento, achados: list[RegistroBanco], fraco: bool,
@@ -193,16 +259,18 @@ def classificar(p: Pagamento, achados: list[RegistroBanco], fraco: bool,
     res = Resultado(pagamento=p, status=NAO_ENVIADO, registros=sorted(achados, key=lambda r: r.arquivo.ordem),
                     match_fraco=fraco, observacoes=list(avisos))
     movs = [r for r in res.registros if _e_efetivacao(r)]
-    cris = [r for r in res.registros if _e_critica(r)]
 
-    if movs:
-        _classificar_mov(res, movs)
-    elif cris:
-        _classificar_cri(res, cris)
+    if any(categoria(r) in _DECISIVAS for r in movs):
+        # Crítica (CRI) que chegou depois do último movimento também entra: reenvio rejeitado vira aviso.
+        ultimo_mov = max(r.arquivo.ordem for r in movs)
+        posteriores = [r for r in res.registros if _e_critica(r) and r.arquivo.ordem > ultimo_mov]
+        _classificar_decisivo(res, movs + posteriores)
+    elif res.registros:
+        _classificar_indeciso(res, res.registros)
     elif outros:
         _classificar_outro_pagamento(res, outros)
 
-    _adicionar_divergencias(res, p, achados, fraco)
+    _adicionar_divergencias(res, p, achados)
 
     desconhecidos = sorted({c for r in res.registros for c in r.ocorrencias if c not in OCORRENCIAS})
     if desconhecidos:
@@ -214,6 +282,7 @@ def classificar(p: Pagamento, achados: list[RegistroBanco], fraco: bool,
 
 
 def conferir(pagamentos: list[Pagamento], registros: list[RegistroBanco]) -> list[Resultado]:
+    recarregar_ocorrencias()
     idx = Indice(registros)
     return [classificar(p, *idx.buscar(p)) for p in pagamentos]
 
@@ -233,11 +302,12 @@ def nome_bate(digitado: str, nome_banco: str) -> bool:
     return _bate(tuple(_palavras(digitado)), nome_banco)
 
 
-def _bate(procuradas: tuple[str, ...], nome_banco: str) -> bool:
+def _bate(procuradas: tuple[str, ...], nome_banco: str, completo: bool = False) -> bool:
+    """completo=True: toda palavra do nome no banco precisa ter sido usada (nada sobrando no banco)."""
     banco, truncado = _palavras_do_banco(nome_banco)
     if not procuradas or not banco:
         return False
-    inteiras, ultimo, faltando = 0, -1, 0
+    inteiras, ultimo, faltando, usadas = 0, -1, 0, 0
     for w in procuradas:
         achou = None
         for i in range(ultimo + 1, len(banco)):
@@ -258,7 +328,9 @@ def _bate(procuradas: tuple[str, ...], nome_banco: str) -> bool:
             continue
         if faltando:
             return False
-        ultimo = achou
+        ultimo, usadas = achou, usadas + 1
+    if completo and usadas < len(banco):
+        return False
     return inteiras >= (2 if faltando else 1)
 
 
@@ -296,7 +368,9 @@ def _achados_por_pagador(p: Pagamento, registros: list[RegistroBanco]) -> list[R
     for r in registros:
         a = r.arquivo
         if id(a) not in bate:
-            bate[id(a)] = (a.pagador_cnpj == cpf) if cpf else bool(a.pagador) and _bate(procuradas, a.pagador)
+            # Pelo nome, só com 2+ palavras: "MARTINS" sozinho não pode trazer todos os pagamentos da empresa.
+            bate[id(a)] = ((a.pagador_cnpj == cpf) if cpf
+                           else bool(a.pagador) and len(procuradas) >= 2 and _bate(procuradas, a.pagador))
     achados = [r for r in registros if bate[id(r.arquivo)]]
     if p.valor is not None:
         achados = [r for r in achados if _valor_igual(r.valor, p.valor)]
@@ -313,6 +387,7 @@ def _por_pagamento(achados: list[RegistroBanco]) -> list[list[RegistroBanco]]:
 
 
 def pesquisar(pesquisas: list[Pagamento], registros: list[RegistroBanco]) -> list[Resultado]:
+    recarregar_ocorrencias()
     idx = Indice(registros)
     resultados: list[Resultado] = []
     for p in pesquisas:

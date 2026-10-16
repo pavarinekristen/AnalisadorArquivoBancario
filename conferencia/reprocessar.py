@@ -6,15 +6,18 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-from . import ntedi
+from . import config, ntedi
 from .modelos import Banco
 
 # Arquivo com erro sai do INBOXENV e volta para o INBOX (mesma subpasta): lá ele é processado de novo.
-BASE_INBOX = Path(r"\\Ntedi020\grpaftdata$\INBOX")
-# Destino do Tribanco ainda não informado: enquanto for None, a tela não deixa mover.
-BASE_TRIBANCO_INBOX: Path | None = None
+BASE_INBOX = config.atual().pastas.inbox
+# Destino do Tribanco (pastas.tribanco_inbox na config): enquanto for vazio, a tela não deixa mover.
+BASE_TRIBANCO_INBOX: Path | None = config.atual().pastas.tribanco_inbox
 
 _ERRO_VOLUME_DIFERENTE = 17   # ERROR_NOT_SAME_DEVICE: rename entre shares/discos diferentes
+# Cópia entre volumes passa por aqui (ao lado do INBOX, não dentro dele): o processador do INBOX
+# nunca vê um arquivo pela metade. A confirmar com a operação se o poller olha subpastas irmãs.
+PASTA_TEMPORARIA = "_reprocessar_tmp"
 
 
 @dataclass(slots=True, frozen=True)
@@ -28,6 +31,11 @@ class ItemArquivo:
 class ResultadoMover:
     movidos: list[str] = field(default_factory=list)
     pulados: list[tuple[str, str]] = field(default_factory=list)
+    copiados_sem_apagar: list[str] = field(default_factory=list)   # chegou no destino, origem ficou
+
+
+class OrigemNaoApagada(OSError):
+    pass
 
 
 def _subpasta(subpasta: str) -> str:
@@ -60,11 +68,20 @@ def _nome_valido(nome: str) -> bool:
     return bool(nome) and nome not in (".", "..") and Path(nome).name == nome and not any(c in nome for c in "\\/:")
 
 
+def _temporario(para: Path) -> Path:
+    pasta = para.parent.parent / PASTA_TEMPORARIA
+    try:
+        pasta.mkdir(exist_ok=True)
+        return pasta / para.name
+    except OSError:
+        return para.with_name(f"~{para.name}.partial")   # sem permissão ao lado: nome que não parece arquivo do banco
+
+
 def _copiar_e_apagar(de: Path, para: Path) -> None:
     # Fallback para volumes diferentes: copia com nome temporário, confere e só então troca e apaga.
-    tmp = para.with_name(para.name + ".tmp")
+    tmp = _temporario(para)
     if tmp.exists():
-        raise FileExistsError(f"já existe {tmp.name} no destino")
+        raise FileExistsError(f"já existe {tmp} (sobra de uma cópia anterior)")
     shutil.copy2(de, tmp)
     try:
         if tmp.stat().st_size != de.stat().st_size:
@@ -73,7 +90,10 @@ def _copiar_e_apagar(de: Path, para: Path) -> None:
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-    de.unlink()
+    try:
+        de.unlink()
+    except OSError as e:
+        raise OrigemNaoApagada(str(e)) from e
 
 
 def _mover_um(de: Path, para: Path) -> None:
@@ -116,6 +136,9 @@ def mover(origem: Path, destino: Path | None, nomes: list[str], simular: bool = 
                 continue
             if not simular:
                 _mover_um(de, para)
+        except OrigemNaoApagada:
+            r.copiados_sem_apagar.append(nome)
+            continue
         except OSError as e:
             r.pulados.append((nome, f"falha ao mover: {e}"))
             continue

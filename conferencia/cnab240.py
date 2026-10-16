@@ -1,20 +1,16 @@
 from __future__ import annotations
 
 import os
-import re
 import threading
 from collections import OrderedDict
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
-from .modelos import ArquivoBanco, RegistroBanco, TipoArquivo
+from . import bancos
+from .bancos.santander import TIPOS_COM_LOTE as _TIPOS_COM_LOTE
+from .bancos.tribanco import CODIGO as CODIGO_TRIBANCO
+from .modelos import ArquivoBanco, RegistroBanco
 
-_NOME_FORN = re.compile(r"FORN_(?P<emp>[A-Z0-9]+)_(?P<lote>\d+)_(?P<data>\d{6})P_(?P<tipo>[A-Z]+)", re.I)
-# Retorno do Tribanco: A + convênio (7 dígitos) + data/sequencial em formatos variados, sempre .dat
-# (A35708191410260001.dat, A3570819_17062026001.dat, A3570801001.dat). A data certa vem do header.
-_NOME_TRIBANCO = re.compile(r"^A(?P<conv>\d{7})[\d_]*(?: \(\d+\))?\.dat$", re.I)
-CODIGO_TRIBANCO = "634"
-_TIPOS_COM_LOTE: frozenset[str] = frozenset({"MOV", "CRI", "REL"})
 _TIPOS_COM_CONTEUDO: frozenset[str] = frozenset({"MOV", "CRI", "RET"})
 # Extensões que nunca são arquivo do banco: nem abre para olhar o header.
 _EXTENSOES_FORA: frozenset[str] = frozenset(
@@ -30,37 +26,16 @@ _TRAVA_CACHE = threading.Lock()
 
 
 def identificar(nome: str) -> ArquivoBanco:
-    base = Path(nome).name
-    m = _NOME_FORN.search(base)
-    if m:
-        d = m.group("data")
-        try:
-            dt = date(2000 + int(d[4:6]), int(d[2:4]), int(d[0:2]))
-        except ValueError:
-            dt = None
-        tipo = m.group("tipo").upper()
-        tipo_final: TipoArquivo = tipo if tipo in _TIPOS_COM_LOTE else "OUTRO"
-        return ArquivoBanco(base, tipo_final, dt, int(m.group("lote")), m.group("emp").upper())
-    m = _NOME_TRIBANCO.match(base)
-    if m:
-        return ArquivoBanco(base, "RET", None, None, m.group("conv"), banco="tribanco")
-    if base.lower().startswith("retorno_"):
-        return ArquivoBanco(base, "RETORNO", None, None, None)
-    return ArquivoBanco(base, "OUTRO", None, None, None)
+    """Cada perfil de banco (conferencia/bancos) tenta reconhecer o arquivo pelo nome."""
+    for perfil in bancos.REGISTRO.values():
+        arq = perfil.identificar(nome)
+        if arq is not None:
+            return arq
+    return ArquivoBanco(Path(nome).name, "OUTRO", None, None, None)
 
 
-def _e_header_tribanco(linha: str) -> bool:
-    return linha[:3] == CODIGO_TRIBANCO and linha[7:8] == "0"
-
-
-def _aplicar_header_tribanco(arq: ArquivoBanco, header: str) -> None:
-    """Header de arquivo CNAB 240: 144-151 data de geração (DDMMAAAA), 152-157 hora (HHMMSS)."""
-    try:
-        arq.data = datetime.strptime(_campo(header, 144, 151), "%d%m%Y").date()
-    except ValueError:
-        pass
-    hora = _campo(header, 152, 157)
-    arq.hora = hora if hora.isdigit() else ""
+def _perfil_do_header(header: str) -> bancos.PerfilBanco | None:
+    return next((p for p in bancos.REGISTRO.values() if p.reconhece_header(header)), None)
 
 
 def _sem_zeros(s: str) -> str:
@@ -72,7 +47,7 @@ def _valor(s: str) -> float:
     return int(s) / 100 if s.isdigit() else 0.0
 
 
-def _ocorrencias(s: str) -> list[str]:
+def ocorrencias(s: str) -> list[str]:
     s = s.strip()
     return [par for i in range(0, len(s), 2) if (par := s[i:i + 2]).strip()]
 
@@ -81,12 +56,33 @@ def _campo(linha: str, a: int, b: int) -> str:
     return linha[a - 1:b]
 
 
+def decodificar(conteudo: bytes) -> str:
+    # As posições do CNAB contam caracteres: arquivo em UTF-8 lido como latin-1 desloca as colunas depois
+    # de um acento (valor 54,00 virava 5,40). UTF-8 inválido cai para latin-1, o padrão dos bancos.
+    try:
+        return conteudo.decode("utf-8")
+    except UnicodeDecodeError:
+        return conteudo.decode("latin-1")
+
+
+def _linhas(texto: str) -> list[str]:
+    linhas = texto.splitlines()
+    # Alguns envios chegam sem quebra de linha: os registros de 240 vêm grudados num bloco só.
+    if len(linhas) == 1 and len(linhas[0]) > 240 and len(linhas[0]) % 240 == 0:
+        return [linhas[0][i:i + 240] for i in range(0, len(linhas[0]), 240)]
+    return linhas
+
+
 def ler_texto(texto: str, arquivo: ArquivoBanco) -> list[RegistroBanco]:
     regs: list[RegistroBanco] = []
     atual: RegistroBanco | None = None
-    for linha_bruta in texto.splitlines():
+    tem_header, fora_do_tamanho = False, 0
+    for linha_bruta in _linhas(texto):
+        if linha_bruta and len(linha_bruta) != 240:
+            fora_do_tamanho += 1
         linha = linha_bruta.ljust(240) if len(linha_bruta) < 240 else linha_bruta
         if linha[7] == "0":
+            tem_header = True
             arquivo.pagador = linha[72:102].strip()
             arquivo.pagador_cnpj = _sem_zeros(linha[18:32])
         if linha[7] != "3":
@@ -99,7 +95,7 @@ def ler_texto(texto: str, arquivo: ArquivoBanco) -> list[RegistroBanco]:
                 arquivo=arquivo, segmento="A",
                 nome=c(44, 73).strip(), cpf_cnpj="",
                 documento=_sem_zeros(c(74, 93)), data=c(94, 101),
-                valor=_valor(c(120, 134)), ocorrencias=_ocorrencias(c(231, 240)),
+                valor=_valor(c(120, 134)), ocorrencias=ocorrencias(c(231, 240)),
             )
             regs.append(atual)
         elif seg == "B" and atual is not None and atual.segmento == "A":
@@ -113,35 +109,41 @@ def ler_texto(texto: str, arquivo: ArquivoBanco) -> list[RegistroBanco]:
                 nome=c(62, 91).strip(), cpf_cnpj="",
                 documento=_sem_zeros(c(183, 202)), data=c(145, 152),
                 valor=_valor(c(153, 167)) or _valor(c(100, 114)),
-                ocorrencias=_ocorrencias(c(231, 240)),
+                ocorrencias=ocorrencias(c(231, 240)),
             )
             regs.append(atual)
         else:
             atual = atual if seg in ("B", "C", "Z") else None
+    if fora_do_tamanho:
+        arquivo.avisos.append(f"{arquivo.nome}: {fora_do_tamanho} linha(s) fora do tamanho 240 do CNAB; "
+                              "valores podem ter sido lidos errado.")
+    if tem_header and not regs and arquivo.tipo in _TIPOS_COM_CONTEUDO:
+        arquivo.avisos.append(f"{arquivo.nome}: arquivo do banco sem nenhum pagamento lido.")
     return regs
 
 
-def _ler_tribanco(arq: ArquivoBanco, conteudo: bytes) -> tuple[ArquivoBanco, list[RegistroBanco]]:
-    # O header (banco 634) é quem decide: aceita retorno com nome fora do padrão e descarta
-    # .dat de nome parecido que não seja do Tribanco.
-    header = conteudo[:240].decode("latin-1")
-    if not _e_header_tribanco(header):
+def _ler_pelo_header(arq: ArquivoBanco, conteudo: bytes, mtime_ns: int | None) -> tuple[ArquivoBanco, list[RegistroBanco]]:
+    # O header é quem decide (ex.: banco 634 = Tribanco): aceita retorno com nome fora do padrão e
+    # descarta .dat de nome parecido que não seja do banco.
+    perfil = _perfil_do_header(conteudo[:240].decode("latin-1"))
+    if perfil is None:
         return ArquivoBanco(arq.nome, "OUTRO", None, None, None), []
-    arq.tipo, arq.banco = "RET", "tribanco"
-    _aplicar_header_tribanco(arq, header)
-    return arq, ler_texto(conteudo.decode("latin-1"), arq)
+    arq.tipo, arq.banco = "RET", perfil.chave
+    texto = decodificar(conteudo)
+    perfil.preparar(arq, _linhas(texto)[0], mtime_ns)
+    return arq, ler_texto(texto, arq)
 
 
-def ler_bytes(nome: str, conteudo: bytes) -> tuple[ArquivoBanco, list[RegistroBanco]]:
+def ler_bytes(nome: str, conteudo: bytes, mtime_ns: int | None = None) -> tuple[ArquivoBanco, list[RegistroBanco]]:
     arq = identificar(nome)
-    if arq.tipo == "OUTRO" or arq.banco == "tribanco":
-        return _ler_tribanco(arq, conteudo)
+    if arq.tipo == "OUTRO" or arq.tipo == "RET":
+        return _ler_pelo_header(arq, conteudo, mtime_ns)
     if arq.tipo not in _TIPOS_COM_CONTEUDO:
         return arq, []
-    return arq, ler_texto(conteudo.decode("latin-1"), arq)
+    return arq, ler_texto(decodificar(conteudo), arq)
 
 
-def _ler_do_disco(caminho: Path) -> Lido:
+def _ler_do_disco(caminho: Path, mtime_ns: int) -> Lido:
     """Baixa só o necessário: REL/Retorno_ são reconhecidos pelo nome e não são abertos; nome
     desconhecido só tem o header lido, e o resto só se for retorno do Tribanco."""
     arq = identificar(caminho.name)
@@ -152,10 +154,10 @@ def _ler_do_disco(caminho: Path) -> Lido:
             return arq, []
         with open(caminho, "rb") as f:
             header = f.read(_TAMANHO_HEADER)
-            if not _e_header_tribanco(header.decode("latin-1")):
+            if _perfil_do_header(header.decode("latin-1")) is None:
                 return arq, []
-            return ler_bytes(caminho.name, header + f.read())
-    return ler_bytes(caminho.name, caminho.read_bytes())
+            return ler_bytes(caminho.name, header + f.read(), mtime_ns)
+    return ler_bytes(caminho.name, caminho.read_bytes(), mtime_ns)
 
 
 def ler_arquivo(caminho: Path, tamanho: int, mtime_ns: int) -> Lido:
@@ -164,7 +166,7 @@ def ler_arquivo(caminho: Path, tamanho: int, mtime_ns: int) -> Lido:
         if chave in _CACHE:
             _CACHE.move_to_end(chave)
             return _CACHE[chave]
-    lido = _ler_do_disco(caminho)
+    lido = _ler_do_disco(caminho, mtime_ns)
     with _TRAVA_CACHE:
         _CACHE[chave] = lido
         while len(_CACHE) > _LIMITE_CACHE:

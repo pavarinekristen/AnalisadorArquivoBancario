@@ -7,14 +7,15 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 
-from . import cnab240
+from . import cnab240, config
 from .modelos import ArquivoBanco, RegistroBanco
 
 Tipo = Literal["retorno", "remessa"]
 
-BASE_RETORNO = Path(r"\\Ntedi020\grpaftdata$\INBOXENV")
-BASE_REMESSA = Path(r"\\Ntedi020\grpaftdata$\SENTBOX")
-BASE_TRIBANCO = Path(r"\\ntedi020\AFTData\tranap\tribanco")
+# Pastas de rede vêm de config/cliente.yaml (cada cliente tem as suas).
+BASE_RETORNO = config.atual().pastas.retorno
+BASE_REMESSA = config.atual().pastas.remessa
+BASE_TRIBANCO = config.atual().pastas.tribanco
 
 ROTULOS: dict[Tipo, str] = {"retorno": "Retorno", "remessa": "Remessa"}
 LEITURAS_SIMULTANEAS = 8
@@ -39,6 +40,18 @@ def caminho(tipo: Tipo, subpasta: str) -> Path:
 def caminho_tribanco(subpasta: str = "") -> Path:
     nome = subpasta.strip().strip("\\/")
     return BASE_TRIBANCO / nome if nome else BASE_TRIBANCO
+
+
+def subpastas(*bases: Path) -> list[str]:
+    """Subpastas da config + as que existem de fato nas bases (pasta fora do ar é ignorada)."""
+    nomes = set(config.atual().subpastas)
+    for base in bases:
+        try:
+            with os.scandir(base) as it:
+                nomes.update(e.name for e in it if e.is_dir() and not e.name.startswith((".", "_", "~")))
+        except OSError:
+            continue
+    return sorted(nomes)
 
 
 def listar_com_filtro(pasta: Path, de: date | None, ate: date | None) -> tuple[list[os.DirEntry[str]], int]:

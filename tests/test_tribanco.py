@@ -131,3 +131,13 @@ def test_pesquisa_pelo_nome_ou_cnpj_da_empresa_pagadora():
     assert [r.pagamento.favorecido for r in res] == ["LEANDRO MAMEDE"]
     res = motor.pesquisar(relatorio.ler_nomes_digitados("JERUSA MARTINS"), regs)
     assert [(r.pagamento.favorecido, r.observacoes) for r in res] == [("JERUSA MARTINS", [])]
+
+
+def test_pesquisa_com_uma_palavra_nao_traz_todos_da_empresa_pagadora():
+    regs = (_arquivo_do_pagador("A3570801001.dat", "INSTITUTO ALAIR MARTINS", "07618414000128",
+                                ("ECCAPLAN CONSULTORIA", "100004074802536", 156000))
+            + _arquivo_do_pagador("A3570819001.dat", "TRIPAG MEIOS DE PAGAMENTO", "22799145000014",
+                                  ("JERUSA MARTINS EVENTOS LTDA", DOC, 12000000)))
+    res = motor.pesquisar(relatorio.ler_nomes_digitados("MARTINS"), regs)
+    assert [r.pagamento.favorecido for r in res] == ["MARTINS"]
+    assert not any("empresa pagadora" in o for r in res for o in r.observacoes)

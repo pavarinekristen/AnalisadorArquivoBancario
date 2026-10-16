@@ -150,3 +150,14 @@ def test_falha_em_um_arquivo_nao_derruba_os_outros(monkeypatch, tmp_path):
     r = ntedi.ler_pasta(pasta, "Teste")
     assert [a.nome for a in r.arquivos] == ["FORN_E_02_071026P_MOV.TXT"]
     assert any("FORN_E_01_071026P_MOV.TXT" in a and "conexão caiu" in a for a in r.avisos)
+
+
+def test_subpastas_junta_config_e_rede(monkeypatch, tmp_path):
+    from conferencia import config
+    base = tmp_path / "INBOXENV"
+    (base / "GE999999").mkdir(parents=True)
+    (base / "_reprocessar_tmp").mkdir()
+    (base / "arquivo.txt").write_bytes(b"")
+    cfg = config.atual()
+    monkeypatch.setattr(config, "atual", lambda: type(cfg)(pastas=cfg.pastas, subpastas=("GE202255", "GE100664")))
+    assert ntedi.subpastas(base, tmp_path / "nao_existe") == ["GE100664", "GE202255", "GE999999"]

@@ -8,6 +8,7 @@ from datetime import date, datetime
 
 import openpyxl
 
+from . import config
 from .modelos import Pagamento
 
 Celula = str | int | float | date | datetime | None
@@ -28,7 +29,7 @@ def _valor_br(v: Celula) -> float | None:
     if isinstance(v, (int, float)):
         return float(v)
     s = str(v).strip().replace("R$", "").strip()
-    if "," in s:
+    if "," in s or re.fullmatch(r"\d{1,3}(?:\.\d{3})+", s):   # "1.500" é milhar, não 1,5
         s = s.replace(".", "").replace(",", ".")
     try:
         return float(s)
@@ -43,17 +44,22 @@ def _data(v: Celula) -> str:
     return f"{m.group(1)}{m.group(2)}{m.group(3)}" if m else ""
 
 
+_CFG = config.atual()
+_PREFIXO_DOC, _TAMANHO_DOC = _CFG.documento.prefixo, _CFG.documento.tamanho
+
+
 def ler_excel(conteudo: bytes) -> dict[str, list[Pagamento]]:
+    marcas = _CFG.excel
     wb = openpyxl.load_workbook(io.BytesIO(conteudo), read_only=True, data_only=True)
     listas: dict[str, list[Pagamento]] = {}
     for ws in wb.worksheets:
         linhas: list[list[Celula]] = [list(r) for r in ws.iter_rows(values_only=True)]
         texto = " ".join(sem_acento(c) for r in linhas[:40] for c in r if c is not None)
-        if "TOTAL P/ REFER" in " ".join(sem_acento(c) for r in linhas for c in r if c is not None):
+        if marcas.banco in " ".join(sem_acento(c) for r in linhas for c in r if c is not None):
             listas[f"{ws.title} (relatório do banco)"] = _aba_banco(linhas)
-        elif "NOME RCA" in texto and "CPF/CNPJ" in texto:
+        elif all(m in texto for m in marcas.resumo):
             listas[f"{ws.title} (resumo)"] = _aba_resumo(linhas)
-        elif "SITUACAO" in texto and "NUMERO OP" in texto:
+        elif all(m in texto for m in marcas.sistema):
             listas[f"{ws.title} (sistema - não pagos)"] = _aba_sistema(linhas)
     return {k: v for k, v in listas.items() if v}
 
@@ -91,7 +97,7 @@ def _aba_banco(linhas: list[list[Celula]]) -> list[Pagamento]:
                        data=next((_data(c) for c in cel[2:] if _data(c)), ""))
             continue
         for j, c in enumerate(cel):
-            m = re.fullmatch(r"(\d{15})-(\d*)-?(.*)", str(c).strip())
+            m = re.fullmatch(rf"(\d{{{_TAMANHO_DOC}}})-(\d*)-?(.*)", str(c).strip())
             if m and cab:
                 resto = cel[j + 1:]
                 valor = next((_valor_br(x) for x in resto if _valor_br(x) is not None), None)
@@ -103,9 +109,11 @@ def _aba_banco(linhas: list[list[Celula]]) -> list[Pagamento]:
 
 
 def _aba_resumo(linhas: list[list[Celula]]) -> list[Pagamento]:
-    i, cab = _cabecalho(linhas, "NOME RCA", "CPF/CNPJ")
+    i, cab = _cabecalho(linhas, *_CFG.excel.resumo)
     c_nome, c_doc, c_op = _col(cab, "NOME"), _col(cab, "CPF"), _col(cab, "OP")
-    c_val = _col(cab, "VALOR", "BANCO") or _col(cab, "VALOR")
+    c_val = _col(cab, "VALOR", "BANCO")
+    if c_val is None:   # "or" perderia a coluna 0
+        c_val = _col(cab, "VALOR")
     c_sit = _col(cab, "RETORNO", "SISTEMA")
     c_ret = _col(cab, "RETORNO", "BANCO")
     pags = []
@@ -124,13 +132,15 @@ def _aba_resumo(linhas: list[list[Celula]]) -> list[Pagamento]:
 
 
 def _aba_sistema(linhas: list[list[Celula]]) -> list[Pagamento]:
-    i, cab = _cabecalho(linhas, "NUMERO OP", "SITUACAO")
+    i, cab = _cabecalho(linhas, *_CFG.excel.sistema)
     c_op, c_nome, c_val = _col(cab, "NUMERO OP"), _col(cab, "NOME"), _col(cab, "VALOR")
     c_sit, c_desc, c_err = _col(cab, "SITUACAO"), _col(cab, "DESCRICAO"), _col(cab, "ERRO")
     c_dt = _col(cab, "DATA PROGRAMADA")
     pags = []
+    if c_op is None or c_nome is None:
+        return []
     for r in linhas[i + 1:]:
-        if c_op is None or not r[c_op] or not r[c_nome]:
+        if not r[c_op] or not r[c_nome]:
             continue
         sit = str(r[c_sit] or "")
         if sem_acento(sit).startswith("SUCESSO"):
@@ -146,14 +156,15 @@ def _aba_sistema(linhas: list[list[Celula]]) -> list[Pagamento]:
                 retorno = retorno or str(erro)[:200]
         pags.append(Pagamento(
             favorecido=str(r[c_nome]).strip(), cpf_cnpj=cpf, op=str(r[c_op]),
-            valor=_valor_br(r[c_val]), data=_data(r[c_dt]) if c_dt is not None else "",
+            valor=_valor_br(r[c_val]) if c_val is not None else None,
+            data=_data(r[c_dt]) if c_dt is not None else "",
             situacao_sistema=sit, retorno_sistema=retorno,
         ))
     return pags
 
 
 _FAV = re.compile(r"^(.+)/(\d{11,14})$")
-_DOC = re.compile(r"^(10000\d{10})-?(\S*)")
+_DOC = re.compile(rf"^({_PREFIXO_DOC}\d{{{_TAMANHO_DOC - len(_PREFIXO_DOC)}}})-?(\S*)")
 
 
 def ler_texto_colado(texto: str) -> list[Pagamento]:
@@ -193,6 +204,8 @@ def ler_texto_colado(texto: str) -> list[Pagamento]:
 
 _VALOR_TXT = re.compile(r"(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}|(?:R\$\s*)?\d+,\d{2}")
 _DATA_TXT = re.compile(r"\d{2}/\d{2}/\d{4}")
+# Valor sem centavos ("1500", "1.500", "R$ 1500"), procurado só depois de tirar documento e CPF/CNPJ.
+_VALOR_INTEIRO = re.compile(r"(?:R\$\s*)?(?<![\w.,])(?:\d{1,3}(?:\.\d{3})+|\d{3,9})(?![\w.,])")
 
 
 def ler_nomes_digitados(texto: str) -> list[Pagamento]:
@@ -210,15 +223,18 @@ def ler_nomes_digitados(texto: str) -> list[Pagamento]:
         if m:
             data = _data(m.group(0))
             resto = resto.replace(m.group(0), " ")
-        for m in re.finditer(r"\d[\d./-]{9,}\d", resto):
+        for m in re.finditer(r"\d[\d./-]{8,}\d", resto):
             dig = re.sub(r"\D", "", m.group(0))
-            if len(dig) == 15 and dig.startswith("10000"):
+            if len(dig) == _TAMANHO_DOC and dig.startswith(_PREFIXO_DOC):
                 doc = dig
-            elif len(dig) in (11, 14):
+            elif len(dig) in (10, 11, 14):   # 10 = CPF que perdeu o zero da frente no Excel
                 cpf = dig.lstrip("0")
             else:
                 continue
             resto = resto.replace(m.group(0), " ")
+        if not valor and (m := _VALOR_INTEIRO.search(resto)):
+            valor = m.group(0)
+            resto = resto.replace(valor, " ")
         nome = " ".join(re.sub(r"[;|/\t,]", " ", resto).split())
         if nome or doc or cpf:
             pags.append(Pagamento(favorecido=nome or doc or cpf, cpf_cnpj=cpf, documento=doc,

@@ -1,0 +1,52 @@
+# Configuração do cliente. Copie este arquivo para config/cliente.yaml e preencha.
+# config/cliente.yaml não vai para o git (tem caminhos e endereços internos da empresa).
+
+marca:
+  nome: "Conferência de Pagamentos"
+  logo: "assets/techone_banner.jpg"
+  icone: "assets/techone_icon.jpg"
+
+# Bancos que aparecem na tela: santander, tribanco
+bancos_ativos: [santander, tribanco]
+
+# Pastas de rede onde o banco deixa os arquivos
+pastas:
+  retorno: '\\servidor\compartilhamento\INBOXENV'     # retornos do Santander (uma subpasta por cliente)
+  remessa: '\\servidor\compartilhamento\SENTBOX'      # remessas enviadas
+  tribanco: '\\servidor\compartilhamento\tribanco'    # retornos do Tribanco
+  inbox: '\\servidor\compartilhamento\INBOX'          # destino do Reprocessar (Santander)
+  tribanco_inbox: ''                                  # destino do Reprocessar (Tribanco); vazio = desligado
+
+# Subpastas (iguais no retorno, remessa e Tribanco) que aparecem na lista da tela.
+# As que existirem de fato na rede e não estiverem aqui também aparecem.
+subpastas: []
+
+# "Caminho manual" na tela só aceita pastas dentro destas (além das pastas acima)
+pastas_permitidas:
+  - '~/Downloads'
+  - '~/Desktop'
+  - '~/Documents'
+
+# Número do documento do pagamento (ex.: 100009000000001)
+documento:
+  prefixo: "10000"
+  tamanho: 15
+
+# Textos que identificam cada aba do Excel do relatório (sem acento, maiúsculas)
+excel:
+  banco: "TOTAL P/ REFER"
+  resumo: ["NOME RCA", "CPF/CNPJ"]
+  sistema: ["SITUACAO", "NUMERO OP"]
+
+# Oracle UCM via OIC. Credencial (client_id/secret) NÃO fica aqui: é gravada no cofre do Windows pela tela.
+ucm:
+  url_token: ""
+  escopo: ""
+  url_oic: ""
+  contas: {}          # conta UCM: rótulo. Só estas contas (e subpastas) podem ser consultadas.
+
+# LGPD: conferências mais antigas que isso são apagadas do histórico ao abrir o programa
+retencao_dias: 365
+
+# Reservado para a integração futura por API (acesso restrito por pessoa)
+api: {}
