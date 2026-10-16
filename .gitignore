@@ -7,3 +7,9 @@ config/cliente.yaml
 instalador/pacote/
 instalador/saida/
 wheels/
+
+# Segredos e dados locais: nunca no git
+.env
+.env.*
+*.db
+*.log
